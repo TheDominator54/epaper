@@ -1,11 +1,13 @@
 services:
   epaper:
     build: .
+    platform: linux/arm64
     container_name: epaper
     restart: unless-stopped
     privileged: true
     environment:
       - TZ=America/New_York
+      - PYTHONPATH=/opt/epd-library-python
     volumes:
       - ./app:/app
     devices:
