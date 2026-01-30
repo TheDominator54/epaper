@@ -7,6 +7,7 @@ Uses partial refresh after first full display. Runs on the Pi. SPI required.
 """
 import json
 import os
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from waveshare_epd import epd2in13_V4
@@ -16,10 +17,10 @@ from PIL import Image, ImageDraw
 EPD_LISTEN_HOST = os.environ.get("EPD_LISTEN_HOST", "0.0.0.0")
 EPD_LISTEN_PORT = int(os.environ.get("EPD_LISTEN_PORT", "9090"))
 
-# Display: 122 x 250 (W x H). 1 row, 3 columns.
+# Display: 122 x 250 (W x H). Hardware shows buffer as 122=vertical, 250=horizontal (landscape).
+# We lay out 3 icons along the 250 axis so they appear as 3 columns in portrait (cable at bottom).
 EPD_W, EPD_H = 122, 250
 NUM_COLS = 3
-COL_W = EPD_W // NUM_COLS
 
 
 def display_state_from_status(status):
@@ -161,13 +162,14 @@ def _draw_icon_rotated(image, box, draw_fn, *args):
 
 
 def render_display(image, state):
-    """Draw 3 icons in 1 row, each icon rotated 90° to use the column height. image is 122x250 (W x H)."""
+    """Draw 3 icons along the long axis so they appear as 3 columns in portrait. image is 122x250 (W x H)."""
     img_w, img_h = image.size
-    col_w = img_w // 3
+    # Bands along the 250 axis → 3 vertical columns when display shows 122=vertical, 250=horizontal
+    band_h = img_h // 3
     boxes = [
-        (0, 0, col_w, img_h),
-        (col_w, 0, 2 * col_w, img_h),
-        (2 * col_w, 0, img_w, img_h),
+        (0, 0, img_w, band_h),
+        (0, band_h, img_w, 2 * band_h),
+        (0, 2 * band_h, img_w, img_h),
     ]
     mute_session, battery_level, connection = state
     _draw_icon_rotated(image, boxes[0], draw_mute_session_icon, mute_session)
@@ -180,10 +182,11 @@ _epd = None
 _image = None
 _last_state = None
 _first_display = True
+_display_lock = threading.Lock()
 
 
 def _apply_state(state):
-    """Update display if state changed. Call with display_state_from_status(result)."""
+    """Update display if state changed. Call with display_state_from_status(result). Holds _display_lock."""
     global _last_state, _first_display
     if state == _last_state:
         return
@@ -196,6 +199,15 @@ def _apply_state(state):
         _epd.displayPartial(_epd.getbuffer(_image))
     _epd.sleep()
     _last_state = state
+
+
+def _apply_state_background(state):
+    """Run _apply_state in a daemon thread so the HTTP handler can return immediately."""
+    def run():
+        with _display_lock:
+            _apply_state(state)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
 
 
 class UpdateHandler(BaseHTTPRequestHandler):
@@ -213,7 +225,7 @@ class UpdateHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         state = display_state_from_status(status)
-        _apply_state(state)
+        _apply_state_background(state)
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
