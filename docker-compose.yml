@@ -1,4 +1,4 @@
-# Using pre-built image (built on Mac, no build on Pi)
+# Pre-built image with app inside — no volume, no path on Pi = reliable deploy
 services:
   epaper:
     image: dominator54/epaper:latest
@@ -8,8 +8,6 @@ services:
     environment:
       - TZ=America/New_York
       - PYTHONPATH=/opt/epd-library-python
-    volumes:
-      - ./app:/app
     devices:
       - /dev/spidev0.0:/dev/spidev0.0
       - /dev/spidev0.1:/dev/spidev0.1

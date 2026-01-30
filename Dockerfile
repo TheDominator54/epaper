@@ -18,3 +18,7 @@ RUN pip install --no-cache-dir RPi.GPIO
 RUN pip install --no-cache-dir pillow
 
 RUN git clone --depth=1 https://github.com/soonuse/epd-library-python.git /opt/epd-library-python
+
+# App baked in so Pi needs no local path (no volume = no hang)
+COPY app /app
+WORKDIR /app
