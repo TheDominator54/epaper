@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on the Raspberry Pi to set up the e-paper app (no Docker).
+# Run on the Raspberry Pi to set up the e-paper app.
 set -e
 cd "$(dirname "$0")"
 

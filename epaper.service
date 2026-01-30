@@ -1,0 +1,27 @@
+# StellarEars e-ink display client – run on Pi host at boot.
+# Copy: sudo cp epaper.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable epaper && sudo systemctl start epaper
+#
+# Optional: override env (e.g. different URL or poll interval):
+#   sudo mkdir -p /etc/systemd/system/epaper.service.d
+#   echo -e '[Service]\nEnvironment="STELLAREARS_STATUS_URL=http://192.168.1.10:8080"\nEnvironment="EPD_POLL_INTERVAL=60"' | sudo tee /etc/systemd/system/epaper.service.d/override.conf
+#   sudo systemctl daemon-reload && sudo systemctl restart epaper
+
+[Unit]
+Description=StellarEars e-ink display client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/epaper
+Environment=PYTHONPATH=/home/pi/epaper/lib/e-Paper/RaspberryPi_JetsonNano/python/lib
+Environment=STELLAREARS_STATUS_URL=http://127.0.0.1:8080
+Environment=EPD_POLL_INTERVAL=30
+ExecStart=/usr/bin/python3 /home/pi/epaper/app/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
