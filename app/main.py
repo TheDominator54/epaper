@@ -75,40 +75,31 @@ def _box_center(box):
 
 
 def draw_mute_session_icon(draw, box, state):
-    """3 states: muted (speaker+X), unmuted (speaker), active (speaker + arc/active)."""
+    """3 states: muted (ear + slash), unmuted (ear), active (ear + arc/ring)."""
     x1, y1, x2, y2 = box
     cx, cy = _box_center(box)
     bw, bh = x2 - x1, y2 - y1
-    w = min(20, bw - 6)
-    h = min(50, bh - 10)
-    sp_left = cx - w // 2
-    sp_top = cy - h // 2
-    draw.rectangle([sp_left, sp_top, sp_left + w, sp_top + h], outline=0, fill=255)
-    cone_w = min(6, bw // 2 - w // 2 - 2)
-    draw.polygon(
-        [
-            (sp_left + w, cy),
-            (sp_left + w + cone_w, cy - h // 3),
-            (sp_left + w + cone_w, cy + h // 3),
-        ],
-        outline=0,
-        fill=0,
-    )
+    rx = min(18, bw // 2 - 4)
+    ry = min(28, bh // 2 - 6)
+    # Outer ear: ellipse outline
+    draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], outline=0, fill=255)
+    # Inner ear (ear canal)
+    ix, iy = rx // 2, ry // 2
+    draw.ellipse([cx - ix, cy - iy, cx + ix, cy + iy], outline=0, fill=255)
     if state == "muted":
         m = 2
         draw.line(
-            [(sp_left - m, sp_top - m), (sp_left + w + cone_w + m, sp_top + h + m)],
+            [(cx - rx - m, cy - ry - m), (cx + rx + m, cy + ry + m)],
             fill=0,
             width=2,
         )
         draw.line(
-            [(sp_left + w + cone_w + m, sp_top - m), (sp_left - m, sp_top + h + m)],
+            [(cx + rx + m, cy - ry - m), (cx - rx - m, cy + ry + m)],
             fill=0,
             width=2,
         )
     elif state == "active":
-        # Arc or ring around speaker = "active session will upload"
-        r = max(w, h) // 2 + 6
+        r = max(rx, ry) + 6
         draw.arc([cx - r, cy - r, cx + r, cy + r], 0, 360, fill=0, width=2)
 
 
@@ -134,18 +125,20 @@ def draw_battery_icon(draw, box, level):
 
 
 def draw_connection_icon(draw, box, success):
-    """2 states: success (check), error (X)."""
+    """2 states: success (check), error (X). Drawn 90° CCW so check points up after tile rotation."""
     x1, y1, x2, y2 = box
     cx, cy = _box_center(box)
     bw, bh = x2 - x1, y2 - y1
     s = min(18, bw // 2 - 4, bh // 2 - 4)
     w = 2
     if success:
-        draw.line([(cx - s, cy), (cx - s // 3, cy + s)], fill=0, width=w)
-        draw.line([(cx - s // 3, cy + s), (cx + s, cy - s)], fill=0, width=w)
+        # Check rotated 90° CCW: (x,y)->(y,-x) relative to center
+        draw.line([(cx, cy + s), (cx + s, cy + s // 3)], fill=0, width=w)
+        draw.line([(cx + s, cy + s // 3), (cx - s, cy - s)], fill=0, width=w)
     else:
-        draw.line([(cx - s, cy - s), (cx + s, cy + s)], fill=0, width=w)
-        draw.line([(cx + s, cy - s), (cx - s, cy + s)], fill=0, width=w)
+        # X rotated 90° CCW
+        draw.line([(cx - s, cy + s), (cx + s, cy - s)], fill=0, width=w)
+        draw.line([(cx + s, cy + s), (cx - s, cy - s)], fill=0, width=w)
 
 
 def _draw_icon_rotated(image, box, draw_fn, *args):
