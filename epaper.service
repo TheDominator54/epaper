@@ -2,9 +2,9 @@
 # Copy: sudo cp epaper.service /etc/systemd/system/
 #       sudo systemctl daemon-reload && sudo systemctl enable epaper && sudo systemctl start epaper
 #
-# Optional: override env (e.g. different URL or poll interval):
+# Optional: override env (e.g. different host/port for push listener):
 #   sudo mkdir -p /etc/systemd/system/epaper.service.d
-#   echo -e '[Service]\nEnvironment="STELLAREARS_STATUS_URL=http://192.168.1.10:8080"\nEnvironment="EPD_POLL_INTERVAL=60"' | sudo tee /etc/systemd/system/epaper.service.d/override.conf
+#   echo -e '[Service]\nEnvironment="EPD_LISTEN_HOST=0.0.0.0"\nEnvironment="EPD_LISTEN_PORT=9090"' | sudo tee /etc/systemd/system/epaper.service.d/override.conf
 #   sudo systemctl daemon-reload && sudo systemctl restart epaper
 
 [Unit]
@@ -17,8 +17,8 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/epaper
 Environment=PYTHONPATH=/home/pi/epaper/lib/e-Paper/RaspberryPi_JetsonNano/python/lib
-Environment=STELLAREARS_STATUS_URL=http://127.0.0.1:8080
-Environment=EPD_POLL_INTERVAL=30
+Environment=EPD_LISTEN_HOST=0.0.0.0
+Environment=EPD_LISTEN_PORT=9090
 ExecStart=/usr/bin/python3 /home/pi/epaper/app/main.py
 Restart=always
 RestartSec=10

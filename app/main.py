@@ -1,39 +1,25 @@
 """
 StellarEars e-ink display client.
-Polls GET <STELLAREARS_STATUS_URL>/status; updates only when state changes.
+Listens for POST /update with JSON body (same shape as StellarEars /status).
+Updates the display only when StellarEars pushes a state change. No polling.
 3 icons in 1 row (no text): Mute+Session (3 states), Battery (5 states), Connection (2 states).
 Uses partial refresh after first full display. Runs on the Pi. SPI required.
 """
 import json
 import os
-import time
-import urllib.request
-import urllib.error
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from waveshare_epd import epd2in13_V4
 from PIL import Image, ImageDraw
 
 # Config from environment
-STELLAREARS_STATUS_URL = os.environ.get("STELLAREARS_STATUS_URL", "http://127.0.0.1:8080")
-EPD_POLL_INTERVAL = int(os.environ.get("EPD_POLL_INTERVAL", "30"))
-
-STATUS_PATH = "/status"
+EPD_LISTEN_HOST = os.environ.get("EPD_LISTEN_HOST", "0.0.0.0")
+EPD_LISTEN_PORT = int(os.environ.get("EPD_LISTEN_PORT", "9090"))
 
 # Display: 122 x 250 (W x H). 1 row, 3 columns.
 EPD_W, EPD_H = 122, 250
 NUM_COLS = 3
 COL_W = EPD_W // NUM_COLS
-
-
-def fetch_status():
-    """GET StellarEars /status and return parsed JSON, or None on error."""
-    url = STELLAREARS_STATUS_URL.rstrip("/") + STATUS_PATH
-    try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.load(resp)
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        return None
 
 
 def display_state_from_status(status):
@@ -161,9 +147,21 @@ def draw_connection_icon(draw, box, success):
         draw.line([(cx + s, cy - s), (cx - s, cy + s)], fill=0, width=w)
 
 
+def _draw_icon_rotated(image, box, draw_fn, *args):
+    """Draw icon in a tile rotated 90° so it runs along the column height; paste into image at box."""
+    x1, y1, x2, y2 = box
+    bw, bh = x2 - x1, y2 - y1
+    # Tile: use column height as "width" so icon utilizes the tall dimension; then rotate -90 to fit column
+    tile = Image.new("1", (bh, bw), 255)  # (250, 40) for default column
+    draw_tile = ImageDraw.Draw(tile)
+    rotated_box = (0, 0, bh, bw)  # (0, 0, 250, 40)
+    draw_fn(draw_tile, rotated_box, *args)
+    rotated = tile.rotate(-90, expand=True)  # 250x40 -> 40x250
+    image.paste(rotated, (x1, y1))
+
+
 def render_display(image, state):
-    """Draw 3 icons in 1 row. image is 122x250 (W x H)."""
-    draw = ImageDraw.Draw(image)
+    """Draw 3 icons in 1 row, each icon rotated 90° to use the column height. image is 122x250 (W x H)."""
     img_w, img_h = image.size
     col_w = img_w // 3
     boxes = [
@@ -172,33 +170,76 @@ def render_display(image, state):
         (2 * col_w, 0, img_w, img_h),
     ]
     mute_session, battery_level, connection = state
-    draw_mute_session_icon(draw, boxes[0], mute_session)
-    draw_battery_icon(draw, boxes[1], battery_level)
-    draw_connection_icon(draw, boxes[2], connection == "success")
+    _draw_icon_rotated(image, boxes[0], draw_mute_session_icon, mute_session)
+    _draw_icon_rotated(image, boxes[1], draw_battery_icon, battery_level)
+    _draw_icon_rotated(image, boxes[2], draw_connection_icon, connection == "success")
+
+
+# Shared display state (used by request handler)
+_epd = None
+_image = None
+_last_state = None
+_first_display = True
+
+
+def _apply_state(state):
+    """Update display if state changed. Call with display_state_from_status(result)."""
+    global _last_state, _first_display
+    if state == _last_state:
+        return
+    _epd.init()
+    render_display(_image, state)
+    if _first_display:
+        _epd.display(_epd.getbuffer(_image))
+        _first_display = False
+    else:
+        _epd.displayPartial(_epd.getbuffer(_image))
+    _epd.sleep()
+    _last_state = state
+
+
+class UpdateHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/update":
+            self.send_response(404)
+            self.end_headers()
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+        try:
+            status = json.loads(body) if body else None
+        except json.JSONDecodeError:
+            self.send_response(400)
+            self.end_headers()
+            return
+        state = display_state_from_status(status)
+        _apply_state(state)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"ok":true}\n')
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"ok\n")
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # quiet by default; set to super().log_message to enable
 
 
 def main():
-    epd = epd2in13_V4.EPD()
-    epd.init()
-    # Full buffer size: 122 x 250
-    image = Image.new("1", (EPD_W, EPD_H), 255)
-    last_state = None
-    first_display = True
-
-    while True:
-        status = fetch_status()
-        state = display_state_from_status(status)
-        if state != last_state:
-            epd.init()
-            render_display(image, state)
-            if first_display:
-                epd.display(epd.getbuffer(image))
-                first_display = False
-            else:
-                epd.displayPartial(epd.getbuffer(image))
-            epd.sleep()
-            last_state = state
-        time.sleep(EPD_POLL_INTERVAL)
+    global _epd, _image
+    _epd = epd2in13_V4.EPD()
+    _epd.init()
+    _image = Image.new("1", (EPD_W, EPD_H), 255)
+    server = HTTPServer((EPD_LISTEN_HOST, EPD_LISTEN_PORT), UpdateHandler)
+    server.serve_forever()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # StellarEars e-ink display client
 
-E-ink display client for **StellarEars**. Runs on a Raspberry Pi, polls the StellarEars `GET /status` API, and refreshes the display only when the shown state changes. Only needs HTTP to the status API.
+E-ink display client for **StellarEars**. Runs on a Raspberry Pi and listens for **push** updates: when StellarEars state changes, StellarEars POSTs the status JSON to this client; the display updates only on those events. No polling.
 
 **Hardware:** Waveshare 2.13" e-Paper HAT V4 (or change the driver in `app/main.py`).
 
@@ -48,14 +48,13 @@ Stop with Ctrl+C. To run at boot, see **Run at boot (systemd)** below.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STELLAREARS_STATUS_URL` | `http://127.0.0.1:8080` | Base URL of StellarEars (no trailing slash). Client requests `GET <url>/status`. |
-| `EPD_POLL_INTERVAL` | `30` | Seconds between polls. E-ink is only redrawn when the displayed state changes. |
+| `EPD_LISTEN_HOST` | `0.0.0.0` | Host to bind the push listener. |
+| `EPD_LISTEN_PORT` | `9090` | Port for POST /update and GET /health. |
 
-Example (StellarEars on another host):
+Example (different port):
 
 ```bash
-export STELLAREARS_STATUS_URL="http://192.168.1.10:8080"
-export EPD_POLL_INTERVAL=60
+export EPD_LISTEN_PORT=9091
 ./run.sh
 ```
 
@@ -71,7 +70,7 @@ sudo systemctl enable epaper
 sudo systemctl start epaper
 ```
 
-To override `STELLAREARS_STATUS_URL` or `EPD_POLL_INTERVAL`, see the comment at the top of `epaper.service`.
+To override `EPD_LISTEN_HOST` or `EPD_LISTEN_PORT`, see the comment at the top of `epaper.service`.
 
 ---
 
@@ -80,21 +79,20 @@ To override `STELLAREARS_STATUS_URL` or `EPD_POLL_INTERVAL`, see the comment at 
 - Raspberry Pi (e.g. Pi Zero 2 W) with Raspberry Pi OS
 - SPI enabled (step 1 above)
 - Git, Python 3, pip
-- StellarEars running and reachable at `STELLAREARS_STATUS_URL` (e.g. `http://127.0.0.1:8080` on the same Pi)
+- StellarEars configured to **push** status to this client when state changes (POST to `http://<epaper-host>:9090/update` with JSON body; see StellarEars repo).
 
 ---
 
-## API (StellarEars `/status`)
+## Push API (this client)
 
-The client expects JSON with at least:
+- **POST /update** — Body: JSON object with the same shape as StellarEars `/status`. The client redraws the e-ink display only when the derived display state (mute/session, battery, connection) changes.
+- **GET /health** — Returns 200 for liveness.
 
-- `muted` (bool) → Mute line
-- `saving_speech` (bool) → Rec: Live when true
-- `session_will_upload` (bool) → Rec: Will upload when true and not Live
-- `last_upload` (str | null), `last_http` (int | null) → Upload line
-- `battery_percent` (int | float | null) → Battery line
+StellarEars should call `POST http://<epaper-host>:<EPD_LISTEN_PORT>/update` with the current status JSON whenever its state changes (e.g. mute, session, battery, upload result).
 
-If the API is unreachable, the first line shows "StellarEars: no API".
+Expected JSON fields (same as StellarEars `/status`):
+
+- `muted` (bool), `session_will_upload` (bool), `last_upload`, `last_http`, `battery_percent`
 
 ---
 
