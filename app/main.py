@@ -3,7 +3,7 @@ StellarEars e-ink display client.
 Listens for POST /update with JSON body (same shape as StellarEars /status).
 Updates the display only when StellarEars pushes a state change. No polling.
 3 icons in 1 row (no text): Mute+Session (3 states), Battery (5 states), Connection (2 states).
-Uses partial refresh after first full display. Runs on the Pi. SPI required.
+Uses full refresh on every update. Runs on the Pi. SPI required.
 """
 import json
 import os
@@ -181,22 +181,17 @@ def render_display(image, state):
 _epd = None
 _image = None
 _last_state = None
-_first_display = True
 _display_lock = threading.Lock()
 
 
 def _apply_state(state):
     """Update display if state changed. Call with display_state_from_status(result). Holds _display_lock."""
-    global _last_state, _first_display
+    global _last_state
     if state == _last_state:
         return
     _epd.init()
     render_display(_image, state)
-    if _first_display:
-        _epd.display(_epd.getbuffer(_image))
-        _first_display = False
-    else:
-        _epd.displayPartial(_epd.getbuffer(_image))
+    _epd.display(_epd.getbuffer(_image))
     _epd.sleep()
     _last_state = state
 
