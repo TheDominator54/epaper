@@ -6,6 +6,26 @@ E-ink display client for **StellarEars**. Runs on a Raspberry Pi and listens for
 
 ---
 
+## File paths
+
+| Path | Description |
+|------|-------------|
+| **In repo** | |
+| `app/main.py` | Main app and display logic. |
+| `run.sh` | Run script; sets `PYTHONPATH` and starts the app. |
+| `setup.sh` | Clones Waveshare lib and installs Python deps. |
+| `epaper.service` | Systemd unit (copy to `/etc/systemd/system/` for run-at-boot). |
+| `requirements.txt` | Python dependencies. |
+| `lib/e-Paper/` | Waveshare e-Paper library (created by `./setup.sh`, not in git). |
+| `lib/e-Paper/RaspberryPi_JetsonNano/python/lib` | Added to `PYTHONPATH` by `run.sh`. |
+| `lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/` | Display driver modules (e.g. `epd2in13_V4`). |
+| **On the Pi (systemd)** | |
+| `/home/YOUR_USER/epaper` | Repo location; set `YOUR_USER` in `epaper.service` to your username. |
+| `/etc/systemd/system/epaper.service` | Installed unit file. |
+| `/etc/systemd/system/epaper.service.d/override.conf` | Optional env overrides. |
+
+---
+
 ## Install (on the Pi)
 
 **1. Enable SPI**
@@ -32,7 +52,7 @@ chmod +x setup.sh run.sh
 ./setup.sh
 ```
 
-This installs Python dependencies (spidev, RPi.GPIO, Pillow) and clones the Waveshare e-Paper library into `lib/e-Paper`.
+This installs Python dependencies (spidev, RPi.GPIO, Pillow) and clones the Waveshare e-Paper library into `lib/e-Paper/`.
 
 **4. Run**
 
@@ -63,14 +83,19 @@ export EPD_LISTEN_PORT=9091
 ## Run at boot (systemd)
 
 ```bash
-# Adjust paths in epaper.service if your repo is not in /home/pi/epaper
+# 1. Copy unit and set your Pi username (see File paths: /home/YOUR_USER/epaper)
 sudo cp epaper.service /etc/systemd/system/
+sudo sed -i 's/YOUR_USER/your_username/' /etc/systemd/system/epaper.service
+
+# 2. Enable and start
 sudo systemctl daemon-reload
 sudo systemctl enable epaper
 sudo systemctl start epaper
 ```
 
-To override `EPD_LISTEN_HOST` or `EPD_LISTEN_PORT`, see the comment at the top of `epaper.service`.
+If it fails: `journalctl -u epaper -n 40 --no-pager`. Ensure you ran `./setup.sh` (so `lib/e-Paper/` exists) and add your user to `spi` and `gpio`: `sudo usermod -aG spi,gpio your_username` (then log out and back in).
+
+To override `EPD_LISTEN_HOST` or `EPD_LISTEN_PORT`, see the comment at the top of `epaper.service` (e.g. `/etc/systemd/system/epaper.service.d/override.conf`).
 
 ---
 
