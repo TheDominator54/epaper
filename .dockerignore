@@ -1,0 +1,11 @@
+# Keep build context small so deploy doesn't hang uploading
+.git
+.gitignore
+*.md
+.env
+.env.*
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv

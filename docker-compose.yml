@@ -1,7 +1,7 @@
+# Using pre-built image (built on Mac, no build on Pi)
 services:
   epaper:
-    build: .
-    platform: linux/arm64
+    image: dominator54/epaper:latest
     container_name: epaper
     restart: unless-stopped
     privileged: true
