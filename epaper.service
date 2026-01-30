@@ -1,6 +1,9 @@
 # StellarEars e-ink display client – run on Pi host at boot.
-# Copy: sudo cp epaper.service /etc/systemd/system/
-#       sudo systemctl daemon-reload && sudo systemctl enable epaper && sudo systemctl start epaper
+# 1. Set YOUR_USER below to your Pi username (e.g. pi or dominic).
+# 2. Copy: sudo cp epaper.service /etc/systemd/system/
+#    Then:  sudo sed -i 's/YOUR_USER/your_actual_username/' /etc/systemd/system/epaper.service
+# 3. Run:   sudo systemctl daemon-reload && sudo systemctl enable epaper && sudo systemctl start epaper
+# If it fails: journalctl -u epaper -n 40 --no-pager   (then add user to spi/gpio if needed, see [Service])
 #
 # Optional: override env (e.g. different host/port for push listener):
 #   sudo mkdir -p /etc/systemd/system/epaper.service.d
@@ -14,12 +17,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/epaper
-Environment=PYTHONPATH=/home/pi/epaper/lib/e-Paper/RaspberryPi_JetsonNano/python/lib
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/epaper
+# SPI and GPIO access for e-paper HAT (add user to groups: sudo usermod -aG spi,gpio YOUR_USER)
+SupplementaryGroups=spi gpio
 Environment=EPD_LISTEN_HOST=0.0.0.0
 Environment=EPD_LISTEN_PORT=9090
-ExecStart=/usr/bin/python3 /home/pi/epaper/app/main.py
+# Use run.sh so PYTHONPATH is set the same way as when run manually (needs lib/e-Paper from setup.sh)
+ExecStart=/bin/bash /home/YOUR_USER/epaper/run.sh
 Restart=always
 RestartSec=10
 
