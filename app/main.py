@@ -1,7 +1,7 @@
 import time
 
-# Example for a 2.13" driver file; change to match your model.
-# Look inside /opt/epd-library-python for the right folder + epd*.py file.
+# Example for a 2.13" driver; change to match your model.
+# Drivers live in lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/
 from waveshare_epd import epd2in13_V4  # <-- you may need epd2in13, epd2in13b, epd7in5_V2, etc.
 from PIL import Image, ImageDraw, ImageFont
 

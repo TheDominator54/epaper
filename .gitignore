@@ -1,0 +1,9 @@
+# Waveshare lib (cloned by setup.sh)
+lib/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
