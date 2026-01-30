@@ -7,7 +7,7 @@ services:
     privileged: true
     environment:
       - TZ=America/New_York
-      - PYTHONPATH=/opt/epd-library-python
+      - PYTHONPATH=/opt/e-Paper/RaspberryPi_JetsonNano/python/lib
     devices:
       - /dev/spidev0.0:/dev/spidev0.0
       - /dev/spidev0.1:/dev/spidev0.1
