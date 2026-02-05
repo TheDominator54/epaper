@@ -8,7 +8,7 @@ import os
 import threading
 from pathlib import Path
 
-from flask import Flask, request, redirect, url_for, render_template_string
+from flask import Flask, request, redirect, url_for, render_template_string, jsonify
 from PIL import Image
 
 # Config from environment
@@ -112,21 +112,39 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    if "image" not in request.files:
-        return redirect(url_for("index", message="No file selected"))
-    f = request.files["image"]
-    if f.filename == "":
-        return redirect(url_for("index", message="No file selected"))
+    f = request.files.get("image")
+    success, message = _process_uploaded_file(f)
+    if success:
+        return redirect(url_for("index", message=message))
+    return redirect(url_for("index", message=message), code=400)
+
+
+def _process_uploaded_file(f) -> tuple[bool, str]:
+    """Validate upload, save to CURRENT_IMAGE, start display update. Returns (success, message)."""
+    if not f or f.filename == "":
+        return False, "No file selected"
     try:
         img = Image.open(f.stream)
         img.verify()
     except Exception as e:
-        return redirect(url_for("index", message=f"Invalid image: {e}"), code=400)
-    # Re-open for saving (verify consumed the stream)
+        return False, f"Invalid image: {e}"
     f.stream.seek(0)
     f.save(CURRENT_IMAGE)
     _update_display_background(CURRENT_IMAGE)
-    return redirect(url_for("index", message="Image uploaded; display updating."))
+    return True, "Image uploaded; display updating."
+
+
+@app.route("/api/photos", methods=["POST"])
+def api_photos():
+    """
+    Upload an image to display on the e-paper. Accepts multipart/form-data with field 'image' or 'file'.
+    Returns JSON: { "ok": true, "message": "..." } or { "ok": false, "error": "..." } with 4xx on failure.
+    """
+    f = request.files.get("image") or request.files.get("file")
+    success, message = _process_uploaded_file(f)
+    if success:
+        return jsonify({"ok": True, "message": message}), 200
+    return jsonify({"ok": False, "error": message}), 400
 
 
 @app.route("/health")

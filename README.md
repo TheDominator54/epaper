@@ -75,6 +75,7 @@ Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd
 | `enable-boot.sh` | Installs systemd unit and enables the service to run at boot. |
 | `troubleshoot.sh` | Checks packages, SPI, lib, and service. |
 | `epaper.service` | Systemd unit (installed by `enable-boot.sh`). |
+| `API.md` | API reference (endpoints, request/response). |
 | `requirements.txt` | Python dependencies. |
 | `lib/e-Paper/` | Waveshare e-Paper library (created by `install.sh`). |
 | `lib/e-Paper/RaspberryPi_JetsonNano/python/lib` | Set as `PYTHONPATH` in the service. |
@@ -118,5 +119,13 @@ If the display does not respond (e.g. “e-Paper busy” or no output): check wi
 
 ## API
 
-- **GET /** — Simple upload form and status.
-- **POST /upload** — `multipart/form-data` with an image file. The image is scaled to the display resolution and shown on the e-paper. Response: redirect or JSON `{"ok": true}`.
+See **[API.md](API.md)** for full details.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Web UI (upload form) |
+| POST | `/upload` | Form upload (redirect) |
+| POST | `/api/photos` | Upload image — `multipart/form-data` with field `image` or `file`; returns JSON `{"ok": true, "message": "..."}` or `{"ok": false, "error": "..."}` |
+| GET | `/health` | Liveness check |
+
+Example: `curl -X POST -F "image=@photo.jpg" http://<pi-ip>:8080/api/photos`
