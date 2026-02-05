@@ -1,8 +1,68 @@
-# StellarEars e-ink display client
+# E-paper image server
 
-E-ink display client for **StellarEars**. Runs on a Raspberry Pi and listens for **push** updates: when StellarEars state changes, StellarEars POSTs the status JSON to this client; the display updates only on those events. No polling.
+Web server that accepts image uploads and displays them on a **Waveshare 13.3" E Ink Spectra 6 (E6) Full Color** e-paper display (1600×1200, SPI, HAT+ Standard Driver HAT). Runs bare metal on a Raspberry Pi (e.g. Pi Zero 2 W) with wall power.
 
-**Hardware:** Waveshare 2.13" e-Paper HAT V4 (or change the driver in `app/main.py`).
+**Reference:** [Waveshare 13.3inch e-Paper HAT+ (E) Manual – Raspberry Pi](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi)
+
+---
+
+## Install on a new Raspberry Pi Zero 2 W
+
+Use a fresh Raspberry Pi OS (64-bit) image. Connect to the Pi over SSH (or keyboard/monitor).
+
+### 1. Install and configure Tailscale
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+# Follow the URL to authorize the machine in your Tailscale admin. Optionally:
+# sudo tailscale set --advertise-exit-node
+```
+
+### 2. Install and configure GitHub CLI
+
+```bash
+sudo apt-get update
+sudo apt-get install -y gh
+gh auth login
+# Choose: GitHub.com, HTTPS, then paste a token or authenticate in browser
+```
+
+### 3. Clone this repo
+
+```bash
+cd ~
+gh repo clone TheDominator54/epaper
+cd epaper
+```
+
+### 4. Run the install script
+
+```bash
+chmod +x install.sh troubleshoot.sh enable-boot.sh
+./install.sh
+```
+
+This installs system packages, enables SPI, adds the required **config.txt** lines for the HAT+ (E), installs the 13.3" E driver from Waveshare’s demo, installs Python dependencies, and adds your user to `spi` and `gpio`. **Reboot** after install so SPI, config.txt, and group membership apply.
+
+### 5. Enable the service to run at boot
+
+After rebooting, from the repo directory:
+
+```bash
+cd ~/epaper
+sudo ./enable-boot.sh
+```
+
+This installs the systemd unit, sets your username in the service file, and enables and starts the epaper service. The web server will be available at `http://<pi-ip>:8080` (or your Tailscale IP). Upload an image there to display it on the e-paper (scaled to 1600×1200).
+
+### 6. (Optional) Run the troubleshoot script
+
+```bash
+./troubleshoot.sh
+```
+
+Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd service are correct.
 
 ---
 
@@ -10,57 +70,17 @@ E-ink display client for **StellarEars**. Runs on a Raspberry Pi and listens for
 
 | Path | Description |
 |------|-------------|
-| **In repo** | |
-| `app/main.py` | Main app and display logic. |
-| `run.sh` | Run script; sets `PYTHONPATH` and starts the app. |
-| `setup.sh` | Clones Waveshare lib and installs Python deps. |
-| `epaper.service` | Systemd unit (copy to `/etc/systemd/system/` for run-at-boot). |
+| `app/main.py` | Web server and e-paper update logic. |
+| `install.sh` | One-time install: system packages, SPI, config.txt, Waveshare lib, groups. |
+| `enable-boot.sh` | Installs systemd unit and enables the service to run at boot. |
+| `troubleshoot.sh` | Checks packages, SPI, lib, and service. |
+| `epaper.service` | Systemd unit (installed by `enable-boot.sh`). |
 | `requirements.txt` | Python dependencies. |
-| `lib/e-Paper/` | Waveshare e-Paper library (created by `./setup.sh`, not in git). |
-| `lib/e-Paper/RaspberryPi_JetsonNano/python/lib` | Added to `PYTHONPATH` by `run.sh`. |
-| `lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/` | Display driver modules (e.g. `epd2in13_V4`). |
-| **On the Pi (systemd)** | |
-| `/home/YOUR_USER/epaper` | Repo location; set `YOUR_USER` in `epaper.service` to your username. |
+| `lib/e-Paper/` | Waveshare e-Paper library (created by `install.sh`). |
+| `lib/e-Paper/RaspberryPi_JetsonNano/python/lib` | Set as `PYTHONPATH` in the service. |
+| `lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/` | Driver modules (e.g. for 13.3" E6). |
 | `/etc/systemd/system/epaper.service` | Installed unit file. |
-| `/etc/systemd/system/epaper.service.d/override.conf` | Optional env overrides. |
-
----
-
-## Install (on the Pi)
-
-**1. Enable SPI**
-
-```bash
-sudo raspi-config
-```
-
-→ **Interface Options** → **SPI** → **Enable** → Finish, then reboot.
-
-**2. Clone the repo**
-
-```bash
-git clone https://github.com/YOUR_USERNAME/epaper.git
-cd epaper
-```
-
-(Use your repo URL if different.)
-
-**3. Run setup**
-
-```bash
-chmod +x setup.sh run.sh
-./setup.sh
-```
-
-This installs Python dependencies (spidev, RPi.GPIO, Pillow) and clones the Waveshare e-Paper library into `lib/e-Paper/`.
-
-**4. Run**
-
-```bash
-./run.sh
-```
-
-Stop with Ctrl+C. To run at boot, see **Run at boot (systemd)** below.
+| `uploads/` | Uploaded images (created by app). |
 
 ---
 
@@ -68,59 +88,35 @@ Stop with Ctrl+C. To run at boot, see **Run at boot (systemd)** below.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EPD_LISTEN_HOST` | `0.0.0.0` | Host to bind the push listener. |
-| `EPD_LISTEN_PORT` | `9090` | Port for POST /update and GET /health. |
-
-Example (different port):
-
-```bash
-export EPD_LISTEN_PORT=9091
-./run.sh
-```
+| `EPD_LISTEN_HOST` | `0.0.0.0` | Host to bind the web server. |
+| `EPD_LISTEN_PORT` | `8080` | Port for HTTP. |
+| `EPD_DRIVER` | `epd13in3e` | Waveshare driver module name (e.g. `epd13in3e` for 13.3" E6). |
 
 ---
 
-## Run at boot (systemd)
+## 13.3" E6 (Spectra 6) driver and config
 
-```bash
-# 1. Copy unit and set your Pi username (see File paths: /home/YOUR_USER/epaper)
-sudo cp epaper.service /etc/systemd/system/
-sudo sed -i 's/YOUR_USER/your_username/' /etc/systemd/system/epaper.service
+The **13.3" E (E6)** 1600×1200 driver is provided in Waveshare’s separate demo package, not the main `waveshareteam/e-Paper` repo. The install script:
 
-# 2. Enable and start
-sudo systemctl daemon-reload
-sudo systemctl enable epaper
-sudo systemctl start epaper
-```
+1. Downloads the demo from [Waveshare’s wiki](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) (or GitHub [E-paper_Separate_Program/13.3inch_e-Paper_E](https://github.com/waveshare/e-Paper/tree/master/E-paper_Separate_Program/13.3inch_e-Paper_E)).
+2. Installs the Python driver into `lib/e-Paper/.../waveshare_epd/` so `EPD_DRIVER=epd13in3e` works.
 
-If it fails: `journalctl -u epaper -n 40 --no-pager`. Ensure you ran `./setup.sh` (so `lib/e-Paper/` exists) and add your user to `spi` and `gpio`: `sudo usermod -aG spi,gpio your_username` (then log out and back in).
+The manual also requires **config.txt** on the Pi: add `gpio=7=op,dl` and `gpio=8=op,dl` (install.sh does this). Use `/boot/config.txt` or `/boot/firmware/config.txt` depending on your OS. Reboot after install.
 
-To override `EPD_LISTEN_HOST` or `EPD_LISTEN_PORT`, see the comment at the top of `epaper.service` (e.g. `/etc/systemd/system/epaper.service.d/override.conf`).
+If the display does not respond (e.g. “e-Paper busy” or no output): check wiring, that SPI is enabled, and see the [manual FAQ](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) — e.g. if `ls /dev/spi*` shows SPI occupied, you may need to adjust `lib/e-Paper/.../waveshare_epd/epdconfig.py` (CS/position) per Waveshare’s instructions.
 
 ---
 
 ## Prerequisites
 
-- Raspberry Pi (e.g. Pi Zero 2 W) with Raspberry Pi OS
-- SPI enabled (step 1 above)
-- Git, Python 3, pip
-- StellarEars configured to **push** status to this client when state changes (POST to `http://<epaper-host>:9090/update` with JSON body; see StellarEars repo).
+- Raspberry Pi (e.g. Pi Zero 2 W) with Raspberry Pi OS (64-bit)
+- Waveshare 13.3" E Ink Spectra 6 (E6) display with HAT+ Driver HAT
+- SPI enabled (done by `install.sh`)
+- Wall power (no battery)
 
 ---
 
-## Push API (this client)
+## API
 
-- **POST /update** — Body: JSON object with the same shape as StellarEars `/status`. The client redraws the e-ink display only when the derived display state (mute/session, battery, connection) changes.
-- **GET /health** — Returns 200 for liveness.
-
-StellarEars should call `POST http://<epaper-host>:<EPD_LISTEN_PORT>/update` with the current status JSON whenever its state changes (e.g. mute, session, battery, upload result).
-
-Expected JSON fields (same as StellarEars `/status`):
-
-- `muted` (bool), `session_will_upload` (bool), `last_upload`, `last_http`, `battery_percent`
-
----
-
-## Different display model
-
-Edit `app/main.py` and change the driver import (e.g. `epd2in13_V4` → `epd7in5_V2`). Driver files are in `lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/`.
+- **GET /** — Simple upload form and status.
+- **POST /upload** — `multipart/form-data` with an image file. The image is scaled to the display resolution and shown on the e-paper. Response: redirect or JSON `{"ok": true}`.

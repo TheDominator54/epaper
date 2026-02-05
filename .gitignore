@@ -1,5 +1,8 @@
-# Waveshare lib (cloned by setup.sh)
+# Waveshare lib (cloned by install.sh)
 lib/
+
+# Uploaded images
+uploads/
 
 # Python
 __pycache__/
