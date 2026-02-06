@@ -105,6 +105,7 @@ Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd
 | `EPD_LISTEN_HOST` | `0.0.0.0` | Host to bind the web server. |
 | `EPD_LISTEN_PORT` | `8080` | Port for HTTP. |
 | `EPD_DRIVER` | `epd13in3e` | Waveshare driver module name (e.g. `epd13in3e` for 13.3" E6). |
+| `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 
 ---
 

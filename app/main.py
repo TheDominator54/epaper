@@ -14,8 +14,13 @@ from pathlib import Path
 from flask import Flask, request, redirect, url_for, render_template_string, jsonify
 from PIL import Image
 
+_log_level = getattr(
+    logging,
+    os.environ.get("LOG_LEVEL", "INFO").strip().upper(),
+    logging.INFO,
+)
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stderr,
