@@ -70,11 +70,11 @@ if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
     if [ -f "$candidate" ]; then
       cp "$candidate" "$WAVESHARE_EPD/epd13in3e.py"
       echo "  Installed epd13in3e.py from $(dirname "$candidate")"
-      # Driver imports epdconfig; copy E demo's epdconfig so it's in the same package
+      # Driver does "import epdconfig" (top-level); Python finds it in PYTHONPATH dir (lib), not inside waveshare_epd
       E_EPDCONFIG="$(dirname "$candidate")/epdconfig.py"
       if [ -f "$E_EPDCONFIG" ]; then
-        cp "$E_EPDCONFIG" "$WAVESHARE_EPD/"
-        echo "  Installed epdconfig.py (13.3\" E) from $(dirname "$candidate")"
+        cp "$E_EPDCONFIG" "$WAVESHARE_LIB/"
+        echo "  Installed epdconfig.py (13.3\" E) into lib/"
       fi
       break
     fi
@@ -85,7 +85,7 @@ if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
       cp "$FOUND" "$WAVESHARE_EPD/epd13in3e.py"
       E_EPDCONFIG="$(dirname "$FOUND")/epdconfig.py"
       if [ -f "$E_EPDCONFIG" ]; then
-        cp "$E_EPDCONFIG" "$WAVESHARE_EPD/"
+        cp "$E_EPDCONFIG" "$WAVESHARE_LIB/"
         echo "  Installed epd13in3e.py and epdconfig.py from $FOUND"
       else
         echo "  Installed epd13in3e.py from $FOUND"
