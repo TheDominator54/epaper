@@ -59,7 +59,8 @@ def _update_display(image_path: Path) -> None:
         img = Image.open(image_path)
         img = _image_to_display_format(img)
         gc.collect()
-        _epd.init()
+        init_fn = getattr(_epd, "Init", getattr(_epd, "init"))
+        init_fn()
         try:
             buf = _epd.getbuffer(img)
             del img
@@ -68,7 +69,8 @@ def _update_display(image_path: Path) -> None:
         except TypeError:
             # Some drivers take image directly
             _epd.display(img)
-        _epd.sleep()
+        sleep_fn = getattr(_epd, "Sleep", getattr(_epd, "sleep"))
+        sleep_fn()
 
 
 def _update_display_background(image_path: Path) -> None:
