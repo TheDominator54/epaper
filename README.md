@@ -109,10 +109,14 @@ Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd
 
 ## 13.3" E6 (Spectra 6) driver and config
 
-The **13.3" E (E6)** 1600×1200 driver is provided in Waveshare’s separate demo package, not the main `waveshareteam/e-Paper` repo. The install script:
+The **13.3" E (E6)** 1600×1200 driver is in the same `waveshareteam/e-Paper` repo under `E-paper_Separate_Program/13.3inch_e-Paper_E`; the file is **epd13in3E.py** (capital E). The install script copies it into `waveshare_epd/epd13in3e.py` so `EPD_DRIVER=epd13in3e` works.
 
-1. Downloads the demo from [Waveshare’s wiki](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) (or GitHub [E-paper_Separate_Program/13.3inch_e-Paper_E](https://github.com/waveshare/e-Paper/tree/master/E-paper_Separate_Program/13.3inch_e-Paper_E)).
-2. Installs the Python driver into `lib/e-Paper/.../waveshare_epd/` so `EPD_DRIVER=epd13in3e` works.
+**If you see `ModuleNotFoundError: No module named 'waveshare_epd.epd13in3e'`**, copy the driver manually (from repo root):
+
+```bash
+cp lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/epd13in3E.py \
+   lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epd13in3e.py
+```
 
 The manual also requires **config.txt** on the Pi: add `gpio=7=op,dl` and `gpio=8=op,dl` (install.sh does this). Use `/boot/config.txt` or `/boot/firmware/config.txt` depending on your OS. Reboot after install.
 

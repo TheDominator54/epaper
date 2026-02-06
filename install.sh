@@ -60,25 +60,26 @@ if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
       E_DEMO_DIR="${REPO_ROOT}/lib/e-Paper-E-repo/E-paper_Separate_Program/13.3inch_e-Paper_E"
     fi
   fi
-  # Copy 13.3" E driver into waveshare_epd
+  # Copy 13.3" E driver into waveshare_epd (repo has epd13in3E.py with capital E; we need epd13in3e.py)
   for candidate in \
-    "${E_DEMO_DIR}/RaspberryPi/python/lib/waveshare_epd/epd13in3e.py" \
-    "${E_DEMO_DIR}/RaspberryPi/python/epd13in3e.py" \
-    "${E_DEMO_DIR}/RaspberryPi/python/lib/epd13in3e.py"; do
+    "${REPO_ROOT}/lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/epd13in3E.py" \
+    "${REPO_ROOT}/lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/epd13in3e.py" \
+    "${E_DEMO_DIR}/RaspberryPi/python/lib/epd13in3E.py" \
+    "${E_DEMO_DIR}/RaspberryPi/python/lib/epd13in3e.py" \
+    "${E_DEMO_DIR}/RaspberryPi/python/lib/waveshare_epd/epd13in3e.py"; do
     if [ -f "$candidate" ]; then
-      cp "$candidate" "$WAVESHARE_EPD/"
+      cp "$candidate" "$WAVESHARE_EPD/epd13in3e.py"
       echo "  Installed epd13in3e.py from $(dirname "$candidate")"
       break
     fi
   done
   if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
-    # Try find in case zip/repo layout differs
-    FOUND="$(find "${REPO_ROOT}/lib" -name "epd13in3e.py" 2>/dev/null | head -1)"
+    FOUND="$(find "${REPO_ROOT}/lib" \( -name "epd13in3E.py" -o -name "epd13in3e.py" \) 2>/dev/null | head -1)"
     if [ -n "$FOUND" ]; then
-      cp "$FOUND" "$WAVESHARE_EPD/"
+      cp "$FOUND" "$WAVESHARE_EPD/epd13in3e.py"
       echo "  Installed epd13in3e.py from $FOUND"
     else
-      echo "  WARNING: epd13in3e.py not found. Download demo from: https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi and copy epd13in3e.py into lib/e-Paper/.../waveshare_epd/"
+      echo "  WARNING: 13.3\" E driver not found. Check lib/e-Paper contains E-paper_Separate_Program/13.3inch_e-Paper_E/.../epd13in3E.py"
     fi
   fi
 else
