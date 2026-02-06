@@ -98,6 +98,15 @@ else
   echo "  epd13in3e.py already present, skipping."
 fi
 
+echo "  Installing Python-only epdconfig (no DEV_Config*.so required)..."
+REPO_EPDCONFIG="${REPO_ROOT}/config/epdconfig_13in3e.py"
+if [ -f "$REPO_EPDCONFIG" ]; then
+  cp "$REPO_EPDCONFIG" "$WAVESHARE_LIB/epdconfig.py"
+  echo "  Installed config/epdconfig_13in3e.py -> lib/epdconfig.py"
+else
+  echo "  WARNING: $REPO_EPDCONFIG not found; using Waveshare epdconfig (requires DEV_Config*.so on Pi)."
+fi
+
 echo "[6/8] Python dependencies (installed via apt in step 1, no pip needed)..."
 echo "  Skipping pip to avoid externally-managed-environment."
 

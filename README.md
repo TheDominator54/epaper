@@ -113,14 +113,17 @@ Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd
 
 The **13.3" E (E6)** 1600×1200 driver is in the same `waveshareteam/e-Paper` repo under `E-paper_Separate_Program/13.3inch_e-Paper_E`; the file is **epd13in3E.py** (capital E). The install script copies it into `waveshare_epd/epd13in3e.py` so `EPD_DRIVER=epd13in3e` works.
 
-**If you see `ModuleNotFoundError: No module named 'waveshare_epd.epd13in3e'` or `No module named 'epdconfig'`**, copy the driver and its config from the E demo (from repo root). The driver uses `import epdconfig`, so **epdconfig.py must go in `.../python/lib/`** (the PYTHONPATH directory), not inside `waveshare_epd`:
+**If you see `ModuleNotFoundError: No module named 'waveshare_epd.epd13in3e'` or `No module named 'epdconfig'`**, copy the driver and config into the lib (from repo root). **epdconfig.py must live in `.../python/lib/`** (the PYTHONPATH directory). Prefer the repo’s **Python-only** epdconfig (no compiled .so) so you don’t need `DEV_Config*.so`:
 
 ```bash
-E_LIB=lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib
 LIB=lib/e-Paper/RaspberryPi_JetsonNano/python/lib
-cp "$E_LIB/epd13in3E.py" "$LIB/waveshare_epd/epd13in3e.py"
-cp "$E_LIB/epdconfig.py" "$LIB/"
+cp config/epdconfig_13in3e.py "$LIB/epdconfig.py"
+# If the driver is missing:
+# E_LIB=lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib
+# cp "$E_LIB/epd13in3E.py" "$LIB/waveshare_epd/epd13in3e.py"
 ```
+
+**If you see `'NoneType' object has no attribute 'DEV_ModuleInit'`**, the Waveshare demo epdconfig is in use and expects compiled `DEV_Config_64_b.so` / `DEV_Config_32_b.so`, which are not shipped. Fix: use the repo’s Python-only epdconfig: `cp config/epdconfig_13in3e.py "$LIB/epdconfig.py"` (with `LIB` as above).
 
 The manual also requires **config.txt** on the Pi: add `gpio=7=op,dl` and `gpio=8=op,dl` (install.sh does this). Use `/boot/config.txt` or `/boot/firmware/config.txt` depending on your OS. Reboot after install.
 
