@@ -60,16 +60,22 @@ if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
       E_DEMO_DIR="${REPO_ROOT}/lib/e-Paper-E-repo/E-paper_Separate_Program/13.3inch_e-Paper_E"
     fi
   fi
-  # Copy 13.3" E driver into waveshare_epd (repo has epd13in3E.py with capital E; we need epd13in3e.py)
+  # Copy 13.3" E driver and its epdconfig into waveshare_epd (repo has epd13in3E.py with capital E; we need epd13in3e.py)
+  E_LIB="${REPO_ROOT}/lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib"
   for candidate in \
-    "${REPO_ROOT}/lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/epd13in3E.py" \
-    "${REPO_ROOT}/lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/epd13in3e.py" \
+    "${E_LIB}/epd13in3E.py" \
+    "${E_LIB}/epd13in3e.py" \
     "${E_DEMO_DIR}/RaspberryPi/python/lib/epd13in3E.py" \
-    "${E_DEMO_DIR}/RaspberryPi/python/lib/epd13in3e.py" \
-    "${E_DEMO_DIR}/RaspberryPi/python/lib/waveshare_epd/epd13in3e.py"; do
+    "${E_DEMO_DIR}/RaspberryPi/python/lib/epd13in3e.py"; do
     if [ -f "$candidate" ]; then
       cp "$candidate" "$WAVESHARE_EPD/epd13in3e.py"
       echo "  Installed epd13in3e.py from $(dirname "$candidate")"
+      # Driver imports epdconfig; copy E demo's epdconfig so it's in the same package
+      E_EPDCONFIG="$(dirname "$candidate")/epdconfig.py"
+      if [ -f "$E_EPDCONFIG" ]; then
+        cp "$E_EPDCONFIG" "$WAVESHARE_EPD/"
+        echo "  Installed epdconfig.py (13.3\" E) from $(dirname "$candidate")"
+      fi
       break
     fi
   done
@@ -77,7 +83,13 @@ if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
     FOUND="$(find "${REPO_ROOT}/lib" \( -name "epd13in3E.py" -o -name "epd13in3e.py" \) 2>/dev/null | head -1)"
     if [ -n "$FOUND" ]; then
       cp "$FOUND" "$WAVESHARE_EPD/epd13in3e.py"
-      echo "  Installed epd13in3e.py from $FOUND"
+      E_EPDCONFIG="$(dirname "$FOUND")/epdconfig.py"
+      if [ -f "$E_EPDCONFIG" ]; then
+        cp "$E_EPDCONFIG" "$WAVESHARE_EPD/"
+        echo "  Installed epd13in3e.py and epdconfig.py from $FOUND"
+      else
+        echo "  Installed epd13in3e.py from $FOUND"
+      fi
     else
       echo "  WARNING: 13.3\" E driver not found. Check lib/e-Paper contains E-paper_Separate_Program/13.3inch_e-Paper_E/.../epd13in3E.py"
     fi

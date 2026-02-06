@@ -111,11 +111,13 @@ Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd
 
 The **13.3" E (E6)** 1600×1200 driver is in the same `waveshareteam/e-Paper` repo under `E-paper_Separate_Program/13.3inch_e-Paper_E`; the file is **epd13in3E.py** (capital E). The install script copies it into `waveshare_epd/epd13in3e.py` so `EPD_DRIVER=epd13in3e` works.
 
-**If you see `ModuleNotFoundError: No module named 'waveshare_epd.epd13in3e'`**, copy the driver manually (from repo root):
+**If you see `ModuleNotFoundError: No module named 'waveshare_epd.epd13in3e'` or `No module named 'epdconfig'`**, copy the driver and its config from the E demo (from repo root):
 
 ```bash
-cp lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib/epd13in3E.py \
-   lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epd13in3e.py
+E_LIB=lib/e-Paper/E-paper_Separate_Program/13.3inch_e-Paper_E/RaspberryPi/python/lib
+EPD=lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd
+cp "$E_LIB/epd13in3E.py" "$EPD/epd13in3e.py"
+cp "$E_LIB/epdconfig.py" "$EPD/"
 ```
 
 The manual also requires **config.txt** on the Pi: add `gpio=7=op,dl` and `gpio=8=op,dl` (install.sh does this). Use `/boot/config.txt` or `/boot/firmware/config.txt` depending on your OS. Reboot after install.
