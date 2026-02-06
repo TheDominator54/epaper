@@ -5,12 +5,22 @@ Web server that accepts image uploads and displays them on a Waveshare 13.3" E I
 """
 import gc
 import importlib
+import logging
 import os
+import sys
 import threading
 from pathlib import Path
 
 from flask import Flask, request, redirect, url_for, render_template_string, jsonify
 from PIL import Image
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stderr,
+)
+logger = logging.getLogger("epaper")
 
 # Config from environment
 EPD_LISTEN_HOST = os.environ.get("EPD_LISTEN_HOST", "0.0.0.0")
@@ -26,9 +36,12 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = None
 
 # Load EPD driver dynamically
+logger.info("Loading EPD driver: EPD_DRIVER=%s", EPD_DRIVER_NAME)
 try:
     _epd_module = importlib.import_module(f"waveshare_epd.{EPD_DRIVER_NAME}")
+    logger.info("Imported module: %s", _epd_module.__name__)
 except Exception as e:
+    logger.exception("Failed to import EPD driver %s", EPD_DRIVER_NAME)
     raise RuntimeError(
         f"Failed to import EPD driver '{EPD_DRIVER_NAME}'. "
         "Set EPD_DRIVER to your driver module name (e.g. epd13in3e). "
@@ -36,15 +49,26 @@ except Exception as e:
     ) from e
 
 # Get driver class (common patterns: EPD or epd class in module)
-EPDClass = getattr(_epd_module, "EPD", getattr(_epd_module, "epd", None))
+EPDClass = getattr(_epd_module, "EPD", None) or getattr(_epd_module, "epd", None)
 if EPDClass is None:
+    logger.error("Module %s has no EPD or epd class", _epd_module.__name__)
     raise RuntimeError(f"EPD driver {EPD_DRIVER_NAME} has no EPD or epd class.")
 
 _epd = EPDClass()
-EPD_WIDTH = getattr(_epd_module, "EPD_WIDTH", getattr(_epd, "width", 1600))
-EPD_HEIGHT = getattr(_epd_module, "EPD_HEIGHT", getattr(_epd, "height", 1200))
+EPD_WIDTH = getattr(_epd_module, "EPD_WIDTH", None) or getattr(_epd, "width", 1600)
+EPD_HEIGHT = getattr(_epd_module, "EPD_HEIGHT", None) or getattr(_epd, "height", 1200)
+logger.info("EPD instance created: %dx%d", EPD_WIDTH, EPD_HEIGHT)
 
 _display_lock = threading.Lock()
+
+
+def _epd_method(*names: str):
+    """Return the first EPD method that exists. Avoids getattr default being evaluated."""
+    for name in names:
+        fn = getattr(_epd, name, None)
+        if fn is not None:
+            return fn
+    raise RuntimeError(f"EPD object has none of: {names}")
 
 
 def _image_to_display_format(image: Image.Image) -> Image.Image:
@@ -55,26 +79,40 @@ def _image_to_display_format(image: Image.Image) -> Image.Image:
 
 def _update_display(image_path: Path) -> None:
     """Load image from path, send to EPD. Runs with _display_lock held."""
-    with _display_lock:
-        img = Image.open(image_path)
-        img = _image_to_display_format(img)
-        gc.collect()
-        init_fn = getattr(_epd, "Init", getattr(_epd, "init"))
-        init_fn()
-        try:
-            buf = _epd.getbuffer(img)
-            del img
+    logger.info("Display update starting: path=%s", image_path)
+    try:
+        with _display_lock:
+            logger.info("Display lock acquired, loading image")
+            img = Image.open(image_path)
+            logger.info("Image opened: size=%s mode=%s", img.size, img.mode)
+            img = _image_to_display_format(img)
+            logger.info("Image resized to EPD format: %dx%d 1-bit", EPD_WIDTH, EPD_HEIGHT)
             gc.collect()
-            _epd.display(buf)
-        except TypeError:
-            # Some drivers take image directly
-            _epd.display(img)
-        sleep_fn = getattr(_epd, "Sleep", getattr(_epd, "sleep"))
-        sleep_fn()
+            logger.info("Calling EPD Init()")
+            init_fn = _epd_method("Init", "init")
+            init_fn()
+            logger.info("EPD Init() done, getting buffer")
+            try:
+                buf = _epd.getbuffer(img)
+                del img
+                gc.collect()
+                logger.info("Buffer obtained (%s bytes), calling display()", len(buf) if buf is not None else "?")
+                _epd.display(buf)
+            except TypeError:
+                logger.info("getbuffer/display(buf) failed with TypeError, trying display(image)")
+                _epd.display(img)
+            logger.info("Calling EPD Sleep()")
+            sleep_fn = _epd_method("Sleep", "sleep")
+            sleep_fn()
+            logger.info("Display update finished successfully")
+    except Exception as e:
+        logger.exception("Display update failed: %s", e)
+        raise
 
 
 def _update_display_background(image_path: Path) -> None:
     """Run _update_display in a daemon thread."""
+    logger.info("Starting background thread to update display from %s", image_path)
     t = threading.Thread(target=_update_display, args=(image_path,), daemon=True)
     t.start()
 
@@ -128,14 +166,19 @@ def upload():
 def _process_uploaded_file(f) -> tuple[bool, str]:
     """Validate upload, save to CURRENT_IMAGE, start display update. Returns (success, message)."""
     if not f or f.filename == "":
+        logger.warning("Upload rejected: no file selected")
         return False, "No file selected"
+    logger.info("Processing upload: filename=%s", f.filename)
     try:
         img = Image.open(f.stream)
         img.verify()
+        logger.info("Image validated: size=%s mode=%s", img.size, img.mode)
     except Exception as e:
+        logger.warning("Invalid image: %s", e)
         return False, f"Invalid image: {e}"
     f.stream.seek(0)
     f.save(CURRENT_IMAGE)
+    logger.info("Saved to %s, starting display update", CURRENT_IMAGE)
     _update_display_background(CURRENT_IMAGE)
     return True, "Image uploaded; display updating."
 
@@ -159,4 +202,10 @@ def health():
 
 
 if __name__ == "__main__":
+    logger.info(
+        "Starting server: host=%s port=%s upload_dir=%s",
+        EPD_LISTEN_HOST,
+        EPD_LISTEN_PORT,
+        UPLOAD_DIR,
+    )
     app.run(host=EPD_LISTEN_HOST, port=EPD_LISTEN_PORT, threaded=True)
