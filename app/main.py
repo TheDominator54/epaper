@@ -3,6 +3,7 @@ E-paper image server.
 Web server that accepts image uploads and displays them on a Waveshare 13.3" E Ink Spectra 6 (E6)
 1600×1200 display. Runs on Raspberry Pi (bare metal). SPI required.
 """
+import gc
 import importlib
 import os
 import threading
@@ -57,9 +58,12 @@ def _update_display(image_path: Path) -> None:
     with _display_lock:
         img = Image.open(image_path)
         img = _image_to_display_format(img)
+        gc.collect()
         _epd.init()
         try:
             buf = _epd.getbuffer(img)
+            del img
+            gc.collect()
             _epd.display(buf)
         except TypeError:
             # Some drivers take image directly

@@ -125,6 +125,8 @@ The manual also requires **config.txt** on the Pi: add `gpio=7=op,dl` and `gpio=
 
 If the display does not respond (e.g. “e-Paper busy” or no output): check wiring, that SPI is enabled, and see the [manual FAQ](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) — e.g. if `ls /dev/spi*` shows SPI occupied, you may need to adjust `lib/e-Paper/.../waveshare_epd/epdconfig.py` (CS/position) per Waveshare’s instructions.
 
+**If the app process is killed when you upload** (terminal shows `Killed`), the system ran out of memory (OOM). Check with `dmesg | tail -5` for an `oom-kill` line. On a Pi with 512 MB RAM (e.g. Pi Zero 2 W) and a desktop session, the 13.3" EPD driver's buffers can trigger this. Options: (1) **Add swap** — e.g. `sudo dphys-swapfile swapoff`, edit `/etc/dphys-swapfile` and set `CONF_SWAPSIZE=512` (or `1024`), then `sudo dphys-swapfile setup && sudo dphys-swapfile swapon`. (2) **Run with less load** — close other apps; or run the Pi headless (no desktop) and start the app over SSH so more RAM is free for the EPD update.
+
 ---
 
 ## Prerequisites
