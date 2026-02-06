@@ -10,7 +10,8 @@ WAVESHARE_EPD="${WAVESHARE_LIB}/waveshare_epd"
 
 echo "[1/8] Updating system and installing packages..."
 sudo apt-get update
-sudo apt-get install -y python3 python3-pip python3-venv python3-pil python3-numpy python3-spidev git unzip wget
+# Use apt for Python deps to avoid PEP 668 externally-managed-environment (no venv)
+sudo apt-get install -y python3 python3-pil python3-numpy python3-spidev python3-flask python3-rpi.gpio git unzip wget
 
 echo "[2/8] Enabling SPI..."
 sudo raspi-config nonint do_spi 0
@@ -71,14 +72,21 @@ if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
     fi
   done
   if [ ! -f "$WAVESHARE_EPD/epd13in3e.py" ]; then
-    echo "  WARNING: epd13in3e.py not found. Download demo from: https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi and copy epd13in3e.py into lib/e-Paper/.../waveshare_epd/"
+    # Try find in case zip/repo layout differs
+    FOUND="$(find "${REPO_ROOT}/lib" -name "epd13in3e.py" 2>/dev/null | head -1)"
+    if [ -n "$FOUND" ]; then
+      cp "$FOUND" "$WAVESHARE_EPD/"
+      echo "  Installed epd13in3e.py from $FOUND"
+    else
+      echo "  WARNING: epd13in3e.py not found. Download demo from: https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi and copy epd13in3e.py into lib/e-Paper/.../waveshare_epd/"
+    fi
   fi
 else
   echo "  epd13in3e.py already present, skipping."
 fi
 
-echo "[6/8] Installing Python dependencies..."
-pip3 install --user -r requirements.txt
+echo "[6/8] Python dependencies (installed via apt in step 1, no pip needed)..."
+echo "  Skipping pip to avoid externally-managed-environment."
 
 echo "[7/8] Adding user to spi and gpio groups..."
 USER="$(whoami)"

@@ -43,11 +43,23 @@ chmod +x install.sh troubleshoot.sh enable-boot.sh
 ./install.sh
 ```
 
-This installs system packages, enables SPI, adds the required **config.txt** lines for the HAT+ (E), installs the 13.3" E driver from Waveshare’s demo, installs Python dependencies, and adds your user to `spi` and `gpio`. **Reboot** after install so SPI, config.txt, and group membership apply.
+This installs system packages (including Python deps via **apt**: Flask, Pillow, spidev, RPi.GPIO — no virtual environment or pip), enables SPI, adds the required **config.txt** lines for the HAT+ (E), installs the 13.3" E driver from Waveshare’s demo, and adds your user to `spi` and `gpio`. **Reboot** after install so SPI, config.txt, and group membership apply.
 
-### 5. Enable the service to run at boot
+### 5. (Optional) Run the app once from the terminal
 
-After rebooting, from the repo directory:
+After rebooting, run the server manually to confirm it works before enabling it at boot:
+
+```bash
+cd ~/epaper
+export PYTHONPATH="$HOME/epaper/lib/e-Paper/RaspberryPi_JetsonNano/python/lib"
+python3 app/main.py
+```
+
+Open `http://<pi-ip>:8080` in a browser, upload an image, and check that the e-paper updates. Stop the server with **Ctrl+C** when done.
+
+### 6. Enable the service to run at boot
+
+From the repo directory:
 
 ```bash
 cd ~/epaper
@@ -56,7 +68,7 @@ sudo ./enable-boot.sh
 
 This installs the systemd unit, sets your username in the service file, and enables and starts the epaper service. The web server will be available at `http://<pi-ip>:8080` (or your Tailscale IP). Upload an image there to display it on the e-paper (scaled to 1600×1200).
 
-### 6. (Optional) Run the troubleshoot script
+### 7. (Optional) Run the troubleshoot script
 
 ```bash
 ./troubleshoot.sh
