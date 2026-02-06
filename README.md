@@ -71,6 +71,7 @@ This installs the systemd unit, sets your username in the service file, and enab
 ### 7. (Optional) Run the troubleshoot script
 
 ```bash
+chmod +x troubleshoot.sh   # if you see "Permission denied"
 ./troubleshoot.sh
 ```
 

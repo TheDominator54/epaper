@@ -27,15 +27,15 @@ check python3 -c "import RPi.GPIO"
 echo ""
 
 echo "--- Waveshare library ---"
-check "[ -d lib/e-Paper ]"
-check "[ -d lib/e-Paper/RaspberryPi_JetsonNano/python/lib ]"
-check "[ -d lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd ]"
+check [ -d "${REPO_ROOT}/lib/e-Paper" ]
+check [ -d "${REPO_ROOT}/lib/e-Paper/RaspberryPi_JetsonNano/python/lib" ]
+check [ -d "${REPO_ROOT}/lib/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd" ]
 echo ""
 
 echo "--- SPI ---"
-check "[ -e /dev/spidev0.0 ]"
+check [ -e /dev/spidev0.0 ]
 if [ -e /dev/spidev0.0 ]; then
-  check "[ -r /dev/spidev0.0 ]" || echo "    (run: sudo usermod -aG spi $(whoami) then log out and back in)"
+  check [ -r /dev/spidev0.0 ]
 fi
 echo ""
 
