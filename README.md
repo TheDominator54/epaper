@@ -77,6 +77,17 @@ chmod +x troubleshoot.sh   # if you see "Permission denied"
 
 Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd service are correct.
 
+### 8. (Optional) Test the display with the manufacturer demo
+
+If the web app says “display updating” but nothing appears on the panel, run the built-in demo to confirm hardware and SPI:
+
+```bash
+chmod +x scripts/run_epd_demo.sh
+./scripts/run_epd_demo.sh
+```
+
+This runs Init → Clear → draw a test pattern → display → Clear → Sleep. If you see “Display Done!!” and a simple pattern on the screen, the hardware path is working and any issue is likely in the web app’s image format or pipeline.
+
 ---
 
 ## File paths
@@ -87,6 +98,8 @@ Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd
 | `install.sh` | One-time install: system packages, SPI, config.txt, Waveshare lib, groups. |
 | `enable-boot.sh` | Installs systemd unit and enables the service to run at boot. |
 | `troubleshoot.sh` | Checks packages, SPI, lib, and service. |
+| `scripts/test_epd_demo.py` | Manufacturer-style EPD test: Init, Clear, draw, display, Sleep. |
+| `scripts/run_epd_demo.sh` | Sets PYTHONPATH and runs `test_epd_demo.py`. |
 | `epaper.service` | Systemd unit (installed by `enable-boot.sh`). |
 | `API.md` | API reference (endpoints, request/response). |
 | `requirements.txt` | Python dependencies. |
