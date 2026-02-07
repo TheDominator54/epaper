@@ -100,6 +100,7 @@ This runs Init → Clear → draw a test pattern → display → Clear → Sleep
 | `troubleshoot.sh` | Checks packages, SPI, lib, and service. |
 | `scripts/test_epd_demo.py` | Manufacturer-style EPD test: Init, Clear, draw, display, Sleep. |
 | `scripts/run_epd_demo.sh` | Sets PYTHONPATH and runs `test_epd_demo.py`. |
+| `scripts/check_hat_gpio.py` | Checks SPI devices and reads BUSY pin (no display update). Verifies HAT wiring. |
 | `epaper.service` | Systemd unit (installed by `enable-boot.sh`). |
 | `API.md` | API reference (endpoints, request/response). |
 | `requirements.txt` | Python dependencies. |
@@ -119,6 +120,9 @@ This runs Init → Clear → draw a test pattern → display → Clear → Sleep
 | `EPD_LISTEN_PORT` | `8080` | Port for HTTP. |
 | `EPD_DRIVER` | `epd13in3e` | Waveshare driver module name (e.g. `epd13in3e` for 13.3" E6). |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `EPD_SPI_BUS` | `0` | SPI bus for epdconfig (default 0). |
+| `EPD_SPI_DEVICE` | `0` | SPI device (0 or 1). Try `1` if display stays blank (Waveshare FAQ). |
+| `EPD_SPI_SPEED_HZ` | `4000000` | SPI clock (Hz). Try 2000000 or 1000000 if image is corrupt. |
 
 ---
 
@@ -143,6 +147,41 @@ The manual also requires **config.txt** on the Pi: add `gpio=7=op,dl` and `gpio=
 If the display does not respond (e.g. “e-Paper busy” or no output): check wiring, that SPI is enabled, and see the [manual FAQ](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) — e.g. if `ls /dev/spi*` shows SPI occupied, you may need to adjust `lib/e-Paper/.../waveshare_epd/epdconfig.py` (CS/position) per Waveshare’s instructions.
 
 **If the app process is killed when you upload** (terminal shows `Killed`), the system ran out of memory (OOM). Check with `dmesg | tail -5` for an `oom-kill` line. On a Pi with 512 MB RAM (e.g. Pi Zero 2 W) and a desktop session, the 13.3" EPD driver's buffers can trigger this. Options: (1) **Add swap** — e.g. `sudo dphys-swapfile swapoff`, edit `/etc/dphys-swapfile` and set `CONF_SWAPSIZE=512` (or `1024`), then `sudo dphys-swapfile setup && sudo dphys-swapfile swapon`. (2) **Run with less load** — close other apps; or run the Pi headless (no desktop) and start the app over SSH so more RAM is free for the EPD update.
+
+### Display shows nothing (software runs, no image)
+
+If the app or `./scripts/run_epd_demo.sh` reports success and you see “Display Done!!” but the panel stays blank, work through this list:
+
+1. **Hardware**
+   - **Power:** Use a 3.3V/5V supply that can deliver enough current (e.g. 1A+). Avoid powering only from USB if the Pi is under load.
+   - **Connection:** HAT must be firmly on the 40-pin header (pins aligned). If using a cable, follow the [manual pin table](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi): VCC→3.3V, GND→GND, DIN→MOSI(19), CLK→SCLK(23), CS_M→CE0(24), CS_S→CE1(26), DC→22, RST→11, BUSY→18, PWR→12.
+   - **FPC:** Don’t bend the display cable; ensure the connector is fully seated on the driver board.
+
+2. **SPI and config**
+   - **SPI enabled:** `ls /dev/spi*` should show at least `/dev/spidev0.0` (and often `spidev0.1`). If not, run `sudo raspi-config` → Interface Options → SPI → Enable, then reboot.
+   - **config.txt:** Must contain `gpio=7=op,dl` and `gpio=8=op,dl` (install.sh adds these). Use `/boot/firmware/config.txt` or `/boot/config.txt` as appropriate, then reboot.
+
+3. **SPI device and speed (Python epdconfig)**
+   - If the display is still blank, try the **other** SPI device (Waveshare FAQ: “modify position to 0,1” when SPI is occupied):
+     ```bash
+     export EPD_SPI_DEVICE=1
+     ./scripts/run_epd_demo.sh
+     ```
+   - If you see corruption or random content, **lower SPI speed**:
+     ```bash
+     export EPD_SPI_SPEED_HZ=2000000
+     ./scripts/run_epd_demo.sh
+     ```
+   - Same env vars apply when running the web app (e.g. set them in `epaper.service` or before `python3 app/main.py`).
+
+4. **C demo / reboot**
+   - If you previously ran the **C** demo (BCM2835 or WiringPi), reboot the Pi before running the Python demo or web app.
+
+5. **Stuck at “e-Paper busy”**
+   - Check wiring and SPI. Ensure BUSY is connected and epdconfig uses BCM 24 for BUSY. If the driver board has a power switch, a long reset can cut power; keep reset low duration short.
+
+6. **Run the official demo**
+   - Download the [Waveshare 13.3" E demo](https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip), unzip, then from `13.3inch_e-Paper_E/RaspberryPi/python/examples/` run `python3 epd_13in3E_test.py` (with their lib on `PYTHONPATH`). If the **official** demo also shows nothing, the issue is hardware or wiring; if it works, the issue is our epdconfig or driver usage.
 
 ---
 

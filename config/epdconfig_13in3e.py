@@ -1,7 +1,8 @@
 # Python-only epdconfig for Waveshare 13.3" E Ink HAT+ (E).
 # Same API as the demo's epdconfig but uses spidev + RPi.GPIO instead of DEV_Config*.so.
-# Pin layout per Waveshare 13.3inch e-Paper HAT+ (E) manual.
+# Pin layout per Waveshare 13.3inch e-Paper HAT+ (E) manual (BCM: CS_M=8/CE0, CS_S=7/CE1).
 
+import os
 import time
 
 import RPi.GPIO as GPIO
@@ -15,6 +16,8 @@ EPD_RST_PIN = 17
 EPD_BUSY_PIN = 24
 EPD_PWR_PIN = 18
 
+# Optional: EPD_SPI_BUS, EPD_SPI_DEVICE (default 0,0). If display stays blank, try 0,1 per Waveshare FAQ.
+# EPD_SPI_SPEED_HZ: default 4000000; try 2000000 or 1000000 if you see corruption or no image.
 _spi = None
 
 
@@ -63,9 +66,12 @@ def module_init() -> None:
 
     _digital_write(EPD_PWR_PIN, 1)
 
+    bus = int(os.environ.get("EPD_SPI_BUS", "0"))
+    device = int(os.environ.get("EPD_SPI_DEVICE", "0"))
+    speed_hz = int(os.environ.get("EPD_SPI_SPEED_HZ", "4000000"))
     _spi = spidev.SpiDev()
-    _spi.open(0, 0)
-    _spi.max_speed_hz = 4_000_000
+    _spi.open(bus, device)
+    _spi.max_speed_hz = speed_hz
     _spi.mode = 0
 
 
