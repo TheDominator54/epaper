@@ -101,6 +101,7 @@ This runs Init → Clear → draw a test pattern → display → Clear → Sleep
 | `scripts/test_epd_demo.py` | Manufacturer-style EPD test: Init, Clear, draw, display, Sleep. |
 | `scripts/run_epd_demo.sh` | Sets PYTHONPATH and runs `test_epd_demo.py`. |
 | `scripts/check_hat_gpio.py` | Checks SPI devices and reads BUSY pin (no display update). Verifies HAT wiring. |
+| `scripts/display_image.py` | Standalone script using the **demo’s** lib (`epd13in3E`). App calls it via subprocess for upload and clear so the display uses the exact same code as the working demo. |
 | `epaper.service` | Systemd unit (installed by `enable-boot.sh`). |
 | `API.md` | API reference (endpoints, request/response). |
 | `requirements.txt` | Python dependencies. |
@@ -123,6 +124,7 @@ This runs Init → Clear → draw a test pattern → display → Clear → Sleep
 | `EPD_SPI_BUS` | `0` | SPI bus for epdconfig (default 0). |
 | `EPD_SPI_DEVICE` | `0` | SPI device (0 or 1). Many 13.3" HATs need `1`; the systemd service sets `EPD_SPI_DEVICE=1`. |
 | `EPD_SPI_SPEED_HZ` | `4000000` | SPI clock (Hz). Try 2000000 or 1000000 if image is corrupt. |
+| `EPD_DEMO_LIB` | `~/13.3inch_e-Paper_E/RaspberryPi/python/lib` | Path to the **demo’s** `lib` (must contain `epd13in3E.py` and `epdconfig.py`). The app runs `scripts/display_image.py` in a subprocess using this lib so display uses the exact same code as the working demo. |
 
 ---
 

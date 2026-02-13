@@ -7,9 +7,14 @@ import gc
 import importlib
 import logging
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Optional
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DISPLAY_SCRIPT = REPO_ROOT / "scripts" / "display_image.py"
 
 from flask import Flask, request, redirect, url_for, render_template_string, jsonify
 from PIL import Image
@@ -74,6 +79,8 @@ logger.info(
 )
 
 _display_lock = threading.Lock()
+# Demo lib path for display_image.py (exact demo code path). Override with EPD_DEMO_LIB.
+EPD_DEMO_LIB_DEFAULT = os.path.expanduser("~/13.3inch_e-Paper_E/RaspberryPi/python/lib")
 
 
 def _epd_method(*names: str):
@@ -132,45 +139,67 @@ def _update_display(image_path: Path) -> None:
         raise
 
 
-def _update_display_background(image_path: Path) -> None:
-    """Run _update_display in a daemon thread."""
-    logger.info("Starting background thread to update display from %s", image_path)
-    t = threading.Thread(target=_update_display, args=(image_path,), daemon=True)
+def _run_display_script(image_path: Optional[Path], clear_only: bool) -> None:
+    """Run scripts/display_image.py (exact demo code path) in subprocess. Blocking."""
+    env = os.environ.copy()
+    env.setdefault("EPD_DEMO_LIB", EPD_DEMO_LIB_DEFAULT)
+    env.setdefault("EPD_SPI_DEVICE", "1")
+    cmd = [sys.executable, str(DISPLAY_SCRIPT)]
+    if clear_only:
+        cmd.append("--clear")
+        logger.info("Running display script (clear): %s", " ".join(cmd))
+    else:
+        cmd.append(str(image_path))
+        logger.info("Running display script: %s", " ".join(cmd))
+    try:
+        proc = subprocess.run(
+            cmd,
+            env=env,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if proc.stdout:
+            for line in proc.stdout.strip().splitlines():
+                logger.info("[display_image] %s", line)
+        if proc.stderr:
+            for line in proc.stderr.strip().splitlines():
+                logger.warning("[display_image] %s", line)
+        if proc.returncode != 0:
+            logger.error("display_image.py exited with code %s", proc.returncode)
+    except subprocess.TimeoutExpired:
+        logger.error("display_image.py timed out after 120s")
+    except Exception as e:
+        logger.exception("Running display script failed: %s", e)
+
+
+def _run_display_script_background(image_path: Optional[Path], clear_only: bool) -> None:
+    """Run display script in a daemon thread."""
+    def run():
+        with _display_lock:
+            _run_display_script(image_path, clear_only)
+    t = threading.Thread(target=run, daemon=True)
     t.start()
 
 
-def _run_clear() -> None:
-    """Run EPD Init -> Clear -> Sleep (same as demo clear). Uses _display_lock."""
-    logger.info("Clear display: starting (Init -> Clear -> Sleep)")
-    try:
-        logger.info("Clear: waiting for display lock")
-        with _display_lock:
-            logger.info("Clear: display lock acquired")
-            logger.info("Clear: calling EPD Init()")
-            init_fn = _epd_method("Init", "init")
-            init_fn()
-            logger.info("Clear: EPD Init() done")
-            clear_fn = getattr(_epd, "Clear", None)
-            if clear_fn is None:
-                logger.warning("Clear: EPD has no Clear method, skipping")
-                return
-            logger.info("Clear: calling EPD Clear() (full panel refresh, ~19s)")
-            clear_fn()
-            logger.info("Clear: EPD Clear() done")
-            logger.info("Clear: calling EPD Sleep()")
-            sleep_fn = _epd_method("Sleep", "sleep")
-            sleep_fn()
-            logger.info("Clear display: finished successfully")
-    except Exception as e:
-        logger.exception("Clear display failed: %s", e)
-        raise
+def _update_display_background(image_path: Path) -> None:
+    """Run display using exact demo code path (subprocess)."""
+    if not DISPLAY_SCRIPT.is_file():
+        logger.error("Display script not found: %s (fallback: in-process disabled)", DISPLAY_SCRIPT)
+        return
+    demo_lib = os.environ.get("EPD_DEMO_LIB", EPD_DEMO_LIB_DEFAULT)
+    logger.info("Starting display update via demo script; EPD_DEMO_LIB=%s", demo_lib)
+    _run_display_script_background(image_path, clear_only=False)
 
 
 def _run_clear_background() -> None:
-    """Run _run_clear in a daemon thread."""
-    logger.info("Starting background thread for clear display")
-    t = threading.Thread(target=_run_clear, daemon=True)
-    t.start()
+    """Run clear via display script (exact demo code path)."""
+    if not DISPLAY_SCRIPT.is_file():
+        logger.error("Display script not found: %s", DISPLAY_SCRIPT)
+        return
+    logger.info("Starting clear via demo script")
+    _run_display_script_background(None, clear_only=True)
 
 
 INDEX_HTML = """
