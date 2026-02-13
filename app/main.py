@@ -77,9 +77,9 @@ def _epd_method(*names: str):
 
 
 def _image_to_display_format(image: Image.Image) -> Image.Image:
-    """Resize to EPD size and convert to 1-bit for typical drivers."""
+    """Resize to EPD size. 13.3" E driver expects RGB and does 7-color quantization in getbuffer()."""
     im = image.convert("RGB").resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
-    return im.convert("1")
+    return im
 
 
 def _update_display(image_path: Path) -> None:
@@ -91,12 +91,16 @@ def _update_display(image_path: Path) -> None:
             img = Image.open(image_path)
             logger.info("Image opened: size=%s mode=%s", img.size, img.mode)
             img = _image_to_display_format(img)
-            logger.info("Image resized to EPD format: %dx%d 1-bit", EPD_WIDTH, EPD_HEIGHT)
+            logger.info("Image resized to EPD format: %dx%d RGB", EPD_WIDTH, EPD_HEIGHT)
             gc.collect()
             logger.info("Calling EPD Init()")
             init_fn = _epd_method("Init", "init")
             init_fn()
-            logger.info("EPD Init() done, getting buffer")
+            clear_fn = getattr(_epd, "Clear", None)
+            if clear_fn is not None:
+                logger.info("Calling EPD Clear() (per demo sequence)")
+                clear_fn()
+            logger.info("Getting buffer")
             try:
                 buf = _epd.getbuffer(img)
                 del img
