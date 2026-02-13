@@ -10,6 +10,82 @@ Web server that accepts image uploads and displays them on a **Waveshare 13.3" E
 
 Use a fresh Raspberry Pi OS (64-bit) image. Connect to the Pi over SSH (or keyboard/monitor).
 
+### Install your SSH key (passwordless login)
+
+From your **laptop or desktop** (not the Pi), copy your public key to the Pi so you can SSH without typing a password:
+
+**If you already have an SSH key** (e.g. `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub`):
+
+```bash
+ssh-copy-id pi@<pi-ip>
+# Enter the Pi's password when prompted. Example:
+# ssh-copy-id pi@192.168.1.100
+```
+
+**If you don't have an SSH key yet**, generate one:
+
+```bash
+ssh-keygen -t ed25519 -C "your_email@example.com"
+# Accept the default path (~/.ssh/id_ed25519), optionally set a passphrase
+```
+
+Then copy it to the Pi:
+
+```bash
+ssh-copy-id pi@<pi-ip>
+```
+
+**Alternative (manual):** If `ssh-copy-id` isn't available, on the Pi create `~/.ssh` and append your public key:
+
+```bash
+# On the Pi (after SSH with password):
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+echo "PASTE_YOUR_PUBLIC_KEY_LINE_HERE" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+Replace `<pi-ip>` with the Pi’s IP (from your router, or run `hostname -I` on the Pi). Use the Pi’s default user (often `pi`) or the user you created during Raspberry Pi OS setup. After this, `ssh pi@<pi-ip>` (or `ssh user@<pi-ip>`) should log in without a password.
+
+### 0. Initial Pi setup (update and swap)
+
+**Update the system:**
+
+```bash
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo reboot
+```
+
+**Add swap (recommended for Pi Zero 2 W with 512MB RAM):**
+
+After reboot, create a 512MB swap file:
+
+```bash
+sudo fallocate -l 512M /swapfile
+# Or if fallocate isn't available:
+# sudo dd if=/dev/zero of=/swapfile bs=1M count=512 status=progress
+
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+```
+
+Make it permanent (enabled after reboot):
+
+```bash
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+Verify swap is active:
+
+```bash
+free -h
+# Should show Swap with non-zero size and some "used" if the system is under load
+```
+
+**Note:** Swap helps prevent OOM kills when the 13.3" EPD driver allocates large buffers during display updates. On a Pi Zero 2 W with desktop, this is especially important.
+
 ### 1. Install and configure Tailscale
 
 ```bash
@@ -77,16 +153,82 @@ chmod +x troubleshoot.sh   # if you see "Permission denied"
 
 Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd service are correct.
 
-### 8. (Optional) Test the display with the manufacturer demo
+### 8. (Optional) Install and run the official Waveshare demo
 
-If the web app says “display updating” but nothing appears on the panel, run the built-in demo to confirm hardware and SPI:
+Before using the web app, test the display with the **official Waveshare demo** to confirm hardware, wiring, and SPI. The web app uses the demo’s lib (`EPD_DEMO_LIB`) so if the demo works, the app should too.
+
+**Download and install the demo:**
 
 ```bash
-chmod +x scripts/run_epd_demo.sh
-./scripts/run_epd_demo.sh
+cd ~
+wget "https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip" -O 13.3inch_e-Paper_E.zip
+unzip 13.3inch_e-Paper_E.zip -d 13.3inch_e-Paper_E
 ```
 
-This runs Init → Clear → draw a test pattern → display → Clear → Sleep. If you see “Display Done!!” and a simple pattern on the screen, the hardware path is working and any issue is likely in the web app’s image format or pipeline.
+**Install Python libraries (if not already installed):**
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-pil python3-numpy python3-spidev
+```
+
+**Use the repo’s Python-only epdconfig** (so you don’t need compiled `.so` files):
+
+```bash
+cp ~/epaper/config/epdconfig_13in3e.py ~/13.3inch_e-Paper_E/RaspberryPi/python/lib/epdconfig.py
+```
+
+**Run the demo:**
+
+```bash
+cd ~/13.3inch_e-Paper_E/RaspberryPi/python/examples
+export EPD_SPI_DEVICE=1
+python3 epd_13in3E_test.py
+```
+
+**What to expect:**
+
+- The demo runs Init → Clear → draws “hello world” and shapes → displays a BMP → Clear → Sleep.
+- Each refresh takes about **19 seconds** (you’ll see “e-Paper busy H” for ~20s during Write DRF).
+- If you see “Display Done!!” and images appear on the screen, the hardware path is working.
+- If only **half** the display updates (e.g. left side), check **CS_S** wiring to **physical pin 26** (see troubleshooting below).
+
+**If the demo works:** The web app should work too (it uses the same demo lib). If the demo fails, fix hardware/wiring before using the app.
+
+**Full demo walkthrough:** See **[docs/waveshare-official-demo.md](docs/waveshare-official-demo.md)** for detailed steps and troubleshooting.
+
+### Checking logs
+
+**When the app runs as a service** (after `enable-boot.sh`), logs go to systemd. On the Pi:
+
+```bash
+# Last 50 lines of the epaper service
+sudo journalctl -u epaper -n 50 --no-pager
+
+# Follow logs in real time
+sudo journalctl -u epaper -f
+
+# Since last boot
+sudo journalctl -u epaper -b --no-pager
+```
+
+**When you run the app manually** (`python3 app/main.py`), logs print to the terminal (stderr). The subprocess script output appears as `[display_image] ...` in those logs.
+
+**System / kernel messages** (e.g. OOM, USB, crashes):
+
+```bash
+# Last 30 kernel lines
+dmesg | tail -30
+
+# Errors in this boot
+sudo journalctl -b -p err --no-pager
+```
+
+**Service status** (is it running?):
+
+```bash
+sudo systemctl status epaper
+```
 
 ---
 
@@ -149,6 +291,14 @@ The manual also requires **config.txt** on the Pi: add `gpio=7=op,dl` and `gpio=
 If the display does not respond (e.g. “e-Paper busy” or no output): check wiring, that SPI is enabled, and see the [manual FAQ](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) — e.g. if `ls /dev/spi*` shows SPI occupied, you may need to adjust `lib/e-Paper/.../waveshare_epd/epdconfig.py` (CS/position) per Waveshare’s instructions.
 
 **If the app process is killed when you upload** (terminal shows `Killed`), the system ran out of memory (OOM). Check with `dmesg | tail -5` for an `oom-kill` line. On a Pi with 512 MB RAM (e.g. Pi Zero 2 W) and a desktop session, the 13.3" EPD driver's buffers can trigger this. Options: (1) **Add swap** — e.g. `sudo dphys-swapfile swapoff`, edit `/etc/dphys-swapfile` and set `CONF_SWAPSIZE=512` (or `1024`), then `sudo dphys-swapfile setup && sudo dphys-swapfile swapon`. (2) **Run with less load** — close other apps; or run the Pi headless (no desktop) and start the app over SSH so more RAM is free for the EPD update.
+
+**If the Pi turns off or reboots when you run the demo or update the display**, the 5 V supply is sagging under load (brownout). The 13.3" panel draws a lot of current during refresh. Fix it by:
+
+- **Power supply:** Use a **5 V, 2.5–3 A** supply (e.g. official Raspberry Pi USB‑C PSU or a known-good adapter). Avoid laptop USB or cheap chargers.
+- **USB cable:** Use a **short, good-quality** cable. Long or thin cables drop voltage when current spikes and can cause brownouts.
+- **Connection:** Ensure the power plug is fully seated in the Pi and in the wall/adapter.
+
+A 3 A supply is enough for a Pi Zero 2 W + this display; if it still shuts off, the cable or the plug connection is the usual cause.
 
 ### Display shows nothing (software runs, no image)
 

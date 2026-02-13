@@ -17,7 +17,8 @@ EPD_BUSY_PIN = 24
 EPD_PWR_PIN = 18
 
 # Optional: EPD_SPI_BUS, EPD_SPI_DEVICE (default 0,0). If display stays blank, try 0,1 per Waveshare FAQ.
-# EPD_SPI_SPEED_HZ: default 4000000; try 2000000 or 1000000 if you see corruption or no image.
+# EPD_SPI_SPEED_HZ: default 1000000 to reduce peak current (avoid brownout). 4000000 if power is solid.
+# EPD_PWR_DELAY_SEC: seconds to wait after PWR on before SPI init (spreads inrush). Default 2.
 _spi = None
 
 
@@ -65,10 +66,13 @@ def module_init() -> None:
     GPIO.setup(EPD_BUSY_PIN, GPIO.IN)
 
     _digital_write(EPD_PWR_PIN, 1)
+    pwr_delay = float(os.environ.get("EPD_PWR_DELAY_SEC", "2"))
+    if pwr_delay > 0:
+        time.sleep(pwr_delay)
 
     bus = int(os.environ.get("EPD_SPI_BUS", "0"))
     device = int(os.environ.get("EPD_SPI_DEVICE", "0"))
-    speed_hz = int(os.environ.get("EPD_SPI_SPEED_HZ", "4000000"))
+    speed_hz = int(os.environ.get("EPD_SPI_SPEED_HZ", "1000000"))
     _spi = spidev.SpiDev()
     _spi.open(bus, device)
     _spi.max_speed_hz = speed_hz
