@@ -31,6 +31,10 @@ logger = logging.getLogger("epaper")
 EPD_LISTEN_HOST = os.environ.get("EPD_LISTEN_HOST", "0.0.0.0")
 EPD_LISTEN_PORT = int(os.environ.get("EPD_LISTEN_PORT", "8080"))
 EPD_DRIVER_NAME = os.environ.get("EPD_DRIVER", "epd13in3e")
+# Many 13.3" E HATs need SPI device 1; set before driver/epdconfig load
+if "EPD_SPI_DEVICE" not in os.environ and EPD_DRIVER_NAME == "epd13in3e":
+    os.environ.setdefault("EPD_SPI_DEVICE", "1")
+    logger.info("Defaulting EPD_SPI_DEVICE=1 for 13.3\" E (set EPD_SPI_DEVICE=0 to override)")
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -62,7 +66,12 @@ if EPDClass is None:
 _epd = EPDClass()
 EPD_WIDTH = getattr(_epd_module, "EPD_WIDTH", None) or getattr(_epd, "width", 1600)
 EPD_HEIGHT = getattr(_epd_module, "EPD_HEIGHT", None) or getattr(_epd, "height", 1200)
-logger.info("EPD instance created: %dx%d", EPD_WIDTH, EPD_HEIGHT)
+logger.info(
+    "EPD instance created: %dx%d (EPD_SPI_DEVICE=%s)",
+    EPD_WIDTH,
+    EPD_HEIGHT,
+    os.environ.get("EPD_SPI_DEVICE", "0"),
+)
 
 _display_lock = threading.Lock()
 
