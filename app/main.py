@@ -95,8 +95,9 @@ def _update_display(image_path: Path) -> None:
     """Load image from path, send to EPD. Runs with _display_lock held."""
     logger.info("Display update starting: path=%s", image_path)
     try:
+        logger.info("Display update: waiting for display lock")
         with _display_lock:
-            logger.info("Display lock acquired, loading image")
+            logger.info("Display update: lock acquired, loading image")
             img = Image.open(image_path)
             logger.info("Image opened: size=%s mode=%s", img.size, img.mode)
             img = _image_to_display_format(img)
@@ -107,18 +108,21 @@ def _update_display(image_path: Path) -> None:
             init_fn()
             clear_fn = getattr(_epd, "Clear", None)
             if clear_fn is not None:
-                logger.info("Calling EPD Clear() (per demo sequence)")
+                logger.info("Calling EPD Clear() (per demo sequence, ~19s)")
                 clear_fn()
-            logger.info("Getting buffer")
+                logger.info("EPD Clear() finished")
+            logger.info("Getting buffer from image")
             try:
                 buf = _epd.getbuffer(img)
                 del img
                 gc.collect()
-                logger.info("Buffer obtained (%s bytes), calling display()", len(buf) if buf is not None else "?")
+                logger.info("Buffer obtained (%s bytes), calling display() (~19s)", len(buf) if buf is not None else "?")
                 _epd.display(buf)
+                logger.info("EPD display() finished")
             except TypeError:
-                logger.info("getbuffer/display(buf) failed with TypeError, trying display(image)")
+                logger.warning("getbuffer/display(buf) failed with TypeError, trying display(image)")
                 _epd.display(img)
+                logger.info("EPD display(image) finished")
             logger.info("Calling EPD Sleep()")
             sleep_fn = _epd_method("Sleep", "sleep")
             sleep_fn()
@@ -132,6 +136,40 @@ def _update_display_background(image_path: Path) -> None:
     """Run _update_display in a daemon thread."""
     logger.info("Starting background thread to update display from %s", image_path)
     t = threading.Thread(target=_update_display, args=(image_path,), daemon=True)
+    t.start()
+
+
+def _run_clear() -> None:
+    """Run EPD Init -> Clear -> Sleep (same as demo clear). Uses _display_lock."""
+    logger.info("Clear display: starting (Init -> Clear -> Sleep)")
+    try:
+        logger.info("Clear: waiting for display lock")
+        with _display_lock:
+            logger.info("Clear: display lock acquired")
+            logger.info("Clear: calling EPD Init()")
+            init_fn = _epd_method("Init", "init")
+            init_fn()
+            logger.info("Clear: EPD Init() done")
+            clear_fn = getattr(_epd, "Clear", None)
+            if clear_fn is None:
+                logger.warning("Clear: EPD has no Clear method, skipping")
+                return
+            logger.info("Clear: calling EPD Clear() (full panel refresh, ~19s)")
+            clear_fn()
+            logger.info("Clear: EPD Clear() done")
+            logger.info("Clear: calling EPD Sleep()")
+            sleep_fn = _epd_method("Sleep", "sleep")
+            sleep_fn()
+            logger.info("Clear display: finished successfully")
+    except Exception as e:
+        logger.exception("Clear display failed: %s", e)
+        raise
+
+
+def _run_clear_background() -> None:
+    """Run _run_clear in a daemon thread."""
+    logger.info("Starting background thread for clear display")
+    t = threading.Thread(target=_run_clear, daemon=True)
     t.start()
 
 
@@ -156,6 +194,10 @@ INDEX_HTML = """
     <input type="file" name="image" required>
     <button type="submit">Upload and display</button>
   </form>
+  <form method="post" action="/clear" style="margin-top: 1em;">
+    <button type="submit">Clear display</button>
+  </form>
+  <p style="margin-top: 1em; font-size: 0.9em; color: #666;">Clear runs Init → Clear → Sleep (like the demo). Takes ~20–25s.</p>
   {% if message %}
   <p class="msg">{{ message }}</p>
   {% endif %}
@@ -167,6 +209,7 @@ INDEX_HTML = """
 @app.route("/")
 def index():
     message = request.args.get("message", "")
+    logger.debug("GET / message=%r", message[:50] if message else "")
     return render_template_string(
         INDEX_HTML, width=EPD_WIDTH, height=EPD_HEIGHT, message=message
     )
@@ -174,11 +217,29 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
+    logger.info("POST /upload received")
     f = request.files.get("image")
     success, message = _process_uploaded_file(f)
+    logger.info("POST /upload result: success=%s message=%s", success, message)
     if success:
         return redirect(url_for("index", message=message))
     return redirect(url_for("index", message=message), code=400)
+
+
+@app.route("/clear", methods=["POST"])
+def clear():
+    """Run EPD clear (Init -> Clear -> Sleep) in background, same as demo."""
+    logger.info("POST /clear received, starting clear in background")
+    _run_clear_background()
+    return redirect(url_for("index", message="Clear started; display updating (~20–25s)."))
+
+
+@app.route("/api/clear", methods=["POST"])
+def api_clear():
+    """Run EPD clear in background. Returns JSON { "ok": true, "message": "..." }."""
+    logger.info("POST /api/clear received")
+    _run_clear_background()
+    return jsonify({"ok": True, "message": "Clear started; display updating (~20–25s)."}), 200
 
 
 def _process_uploaded_file(f) -> tuple[bool, str]:
@@ -216,6 +277,7 @@ def api_photos():
 
 @app.route("/health")
 def health():
+    logger.debug("GET /health")
     return "ok", 200
 
 

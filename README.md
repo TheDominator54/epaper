@@ -200,9 +200,13 @@ See **[API.md](API.md)** for full details.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/` | Web UI (upload form) |
+| GET | `/` | Web UI (upload form + Clear button) |
 | POST | `/upload` | Form upload (redirect) |
+| POST | `/clear` | Clear display (Init → Clear → Sleep, ~20–25s). Redirect. |
+| POST | `/api/clear` | Clear display; returns JSON `{"ok": true, "message": "..."}` |
 | POST | `/api/photos` | Upload image — `multipart/form-data` with field `image` or `file`; returns JSON `{"ok": true, "message": "..."}` or `{"ok": false, "error": "..."}` |
 | GET | `/health` | Liveness check |
 
-Example: `curl -X POST -F "image=@photo.jpg" http://<pi-ip>:8080/api/photos`
+Examples:  
+`curl -X POST -F "image=@photo.jpg" http://<pi-ip>:8080/api/photos`  
+`curl -X POST http://<pi-ip>:8080/api/clear` (clear display)

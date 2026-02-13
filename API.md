@@ -25,6 +25,32 @@ Prefer **`POST /api/photos`** for scripts and integrations; it returns JSON.
 
 ---
 
+### `POST /clear`
+
+Runs the EPD clear routine (Init → Clear → Sleep) in the background, same as the manufacturer demo. The display is cleared to a blank state. Takes about 20–25 seconds.
+
+- **Success:** Redirects to `/?message=Clear started; display updating (~20–25s).` with status `302`.
+
+---
+
+### `POST /api/clear`
+
+Same as `POST /clear` but returns JSON. Use for scripts.
+
+**Response:** `200 OK`, `application/json`:
+
+```json
+{ "ok": true, "message": "Clear started; display updating (~20–25s)." }
+```
+
+**Example (curl)**
+
+```bash
+curl -X POST http://<host>:8080/api/clear
+```
+
+---
+
 ### `POST /api/photos`
 
 Upload an image to display on the e-paper panel. The image is saved, scaled to the display resolution (e.g. 1600×1200), and the display is updated in the background. Any image format supported by the server (JPEG, PNG, BMP, GIF, WebP, etc.) and any size or resolution are accepted.
