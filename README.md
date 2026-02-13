@@ -121,7 +121,7 @@ This runs Init → Clear → draw a test pattern → display → Clear → Sleep
 | `EPD_DRIVER` | `epd13in3e` | Waveshare driver module name (e.g. `epd13in3e` for 13.3" E6). |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `EPD_SPI_BUS` | `0` | SPI bus for epdconfig (default 0). |
-| `EPD_SPI_DEVICE` | `0` | SPI device (0 or 1). Try `1` if display stays blank (Waveshare FAQ). |
+| `EPD_SPI_DEVICE` | `0` | SPI device (0 or 1). Many 13.3" HATs need `1`; the systemd service sets `EPD_SPI_DEVICE=1`. |
 | `EPD_SPI_SPEED_HZ` | `4000000` | SPI clock (Hz). Try 2000000 or 1000000 if image is corrupt. |
 
 ---

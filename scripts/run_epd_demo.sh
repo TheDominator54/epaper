@@ -13,4 +13,6 @@ if [ ! -d "$LIB" ]; then
 fi
 
 export PYTHONPATH="$LIB"
+# Many 13.3" HATs need SPI device 1 (CE1)
+export EPD_SPI_DEVICE="${EPD_SPI_DEVICE:-1}"
 exec python3 scripts/test_epd_demo.py

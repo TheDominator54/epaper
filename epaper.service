@@ -14,6 +14,7 @@ User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER/epaper
 SupplementaryGroups=spi gpio
 Environment=PYTHONPATH=/home/YOUR_USER/epaper/lib/e-Paper/RaspberryPi_JetsonNano/python/lib
+Environment=EPD_SPI_DEVICE=1
 Environment=EPD_LISTEN_HOST=0.0.0.0
 Environment=EPD_LISTEN_PORT=8080
 ExecStart=/usr/bin/python3 /home/YOUR_USER/epaper/app/main.py
