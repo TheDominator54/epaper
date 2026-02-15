@@ -49,7 +49,8 @@ def _digital_read(pin: int) -> int:
 
 def digital_write(pin: int, value: int) -> None:
     global _spi
-    if _use_pi5_dual_spi and value:
+    # Driver uses active-low CS: 0 = select, 1 = deselect. Switch SPI device when selecting (value=0).
+    if _use_pi5_dual_spi and value == 0:
         if pin == EPD_CS_M_PIN:
             _spi = _spi_m
         elif pin == EPD_CS_S_PIN:
