@@ -37,19 +37,7 @@ sudo apt remove -y python3-rpi.gpio
 sudo apt install -y python3-pil python3-numpy python3-spidev
 ```
 
-**4. Get the demo `pic` folder**
-
-The test script needs `pic/Font.ttc` and `pic/13in3E.bmp`. Download the Waveshare zip and copy only `pic` into the repo (so the rest of the repo is unchanged):
-
-```bash
-cd ~/epaper
-wget -q -O /tmp/epaper_demo.zip "https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip"
-unzip -o /tmp/epaper_demo.zip -d /tmp
-cp -r /tmp/13.3inch_e-Paper_E/RaspberryPi/python/pic 13.3inch_e-Paper_E/RaspberryPi/python/
-rm -rf /tmp/13.3inch_e-Paper_E /tmp/epaper_demo.zip
-```
-
-(If you already have the zip elsewhere, copy `RaspberryPi/python/pic` into `13.3inch_e-Paper_E/RaspberryPi/python/` so `Font.ttc` and `13in3E.bmp` are there.)
+The repo already includes `pic/` (Font.ttc and 13in3E.bmp) so no extra download is needed.
 
 ## Run the demo
 
@@ -57,6 +45,7 @@ From the repo root on the Pi:
 
 ```bash
 cd ~/epaper
+./check_demo.sh   # optional: verify SPI, deps, and files
 ./run_demo.sh
 ```
 
