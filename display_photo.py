@@ -252,115 +252,145 @@ API_DOCS_HTML = """<!DOCTYPE html>
 
 
 HTML_PAGE = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>e-Paper Photo</title>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>e-Paper Photo Display</title>
 <style>
-body{font-family:system-ui;max-width:420px;margin:2rem auto;padding:1rem;background:#111;color:#ddd;}
-h1{font-size:1.2rem;}
-input[type="file"],input[type="url"]{margin:0.5rem 0;width:100%;padding:0.5rem;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#ddd;}
-input[type="url"]{font-size:1rem;}
-input[type="range"]{width:100%;margin:0.25rem 0;}
-button{padding:0.6rem 1rem;margin:0.25rem 0.25rem 0.25rem 0;cursor:pointer;border:none;border-radius:6px;font-size:1rem;}
-.btn-display{background:#07c;color:#fff;}
-.btn-clear{background:#444;color:#fff;}
-.msg{margin-top:1rem;padding:0.5rem;border-radius:6px;font-size:0.9rem;}
-.msg.ok{background:#162;}
-.msg.err{background:#622;}
-.section{margin-bottom:1.25rem;}
-label{font-size:0.85rem;color:#999;}
-.controls{background:#222;padding:0.75rem;border-radius:8px;margin:0.75rem 0;}
-.controls label{display:block;margin-bottom:0.25rem;}
-.controls .row{display:flex;align-items:center;gap:0.5rem;margin:0.35rem 0;}
-#preview{max-width:100%;display:block;margin:0.5rem 0;border-radius:6px;background:#222;}
-.preview-wrap{display:none;}
-.preview-wrap.show{display:block;}
-.preview-caption{font-size:0.75rem;color:#666;margin-bottom:0.25rem;}
-.source-row{display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin:0.5rem 0;}
-.source-row input[type="file"]{flex:0 0 auto;}
+*{box-sizing:border-box;}
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;padding:1.5rem 1.25rem;background:#0d0d0d;color:#e8e8e8;line-height:1.5;font-size:15px;}
+h1{font-size:1.5rem;font-weight:600;margin:0 0 0.5rem;letter-spacing:-0.02em;}
+.subtitle{color:#888;font-size:0.9rem;margin-bottom:1.5rem;}
+.howto{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:1rem 1.15rem;margin-bottom:1.5rem;font-size:0.9rem;color:#aaa;}
+.howto strong{color:#ccc;}
+.howto ol{margin:0.35rem 0 0 1.25rem;padding:0;}
+.howto li{margin:0.25rem 0;}
+.card{background:#161616;border:1px solid #252525;border-radius:10px;padding:1.15rem;margin-bottom:1.25rem;}
+.card-title{font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-bottom:0.6rem;}
+label{font-size:0.85rem;color:#999;display:block;margin-bottom:0.35rem;}
+input[type="file"],input[type="url"],input[type="number"],textarea{width:100%;padding:0.65rem 0.75rem;margin:0.25rem 0;background:#222;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:1rem;}
+input:focus,textarea:focus{outline:none;border-color:#0a7ea4;}
+input[type="url"]::placeholder,textarea::placeholder{color:#555;}
+input[type="range"]{width:100%;height:6px;margin:0.4rem 0;accent-color:#0a7ea4;}
+button{padding:0.6rem 1rem;border-radius:8px;font-size:0.95rem;font-weight:500;cursor:pointer;border:none;transition:opacity 0.15s,background 0.15s;}
+button:hover:not(:disabled){opacity:0.92;}
+button:disabled{opacity:0.5;cursor:not-allowed;}
+.btn-primary{background:#0a7ea4;color:#fff;}
+.btn-secondary{background:#2a2a2a;color:#ddd;border:1px solid #3a3a3a;}
+.btn-ori{padding:0.5rem 1rem;font-size:0.9rem;background:#252525;color:#aaa;border:1px solid #353535;}
+.btn-ori.active{background:#0a7ea4;color:#fff;border-color:#0a7ea4;}
+.orientation-row{display:flex;gap:0.5rem;margin-top:0.35rem;}
+.source-row{display:flex;flex-wrap:wrap;align-items:center;gap:0.6rem;margin-top:0.5rem;}
+.source-row input[type="file"]{flex:0 0 auto;max-width:100%;}
 .source-row input[type="url"]{flex:1;min-width:140px;}
-.source-row .or{color:#666;font-size:0.9rem;}
-#displayBtn{margin-top:0.75rem;}
-.text-section{margin-top:1rem;}
-#textIn{width:100%;min-height:80px;padding:0.5rem;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#ddd;font:inherit;resize:vertical;box-sizing:border-box;}
-.text-row{display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;}
-.text-row label{flex:0 0 auto;}
-#fontSize{width:4em;}
-.orientation-row{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;}
-.orientation-row .btn-ori{padding:0.4rem 0.75rem;font-size:0.9rem;background:#333;color:#ddd;border:1px solid #555;border-radius:6px;cursor:pointer;}
-.orientation-row .btn-ori.active{background:#07c;border-color:#07c;color:#fff;}
-.orientation-section{margin-bottom:1rem;}
+.source-row .divider{color:#555;font-size:0.85rem;}
+.text-row{display:flex;align-items:center;gap:0.6rem;margin-top:0.6rem;}
+#fontSize{width:4.5em;}
+.controls{background:#1c1c1c;border-radius:8px;padding:1rem;margin:1rem 0;}
+.controls .row{display:flex;align-items:center;gap:0.5rem;margin:0.4rem 0;}
+#preview{max-width:100%;display:block;margin:0.75rem 0;border-radius:8px;background:#1a1a1a;box-shadow:0 2px 8px rgba(0,0,0,0.3);}
+.preview-wrap{display:none;margin-top:1rem;}
+.preview-wrap.show{display:block;}
+.preview-caption{font-size:0.8rem;color:#666;margin-bottom:0.5rem;}
+#displayBtn{margin-top:1rem;width:100%;padding:0.75rem;font-size:1rem;}
+.actions{margin-top:1.25rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;}
+.footer{margin-top:1.5rem;padding-top:1rem;border-top:1px solid #222;font-size:0.8rem;color:#666;}
+.footer a{color:#5a9bb8;}
+.msg{padding:0.75rem 1rem;border-radius:8px;font-size:0.9rem;margin-top:1rem;display:none;}
+.msg.show{display:block;}
+.msg.ok{background:rgba(40,80,40,0.4);color:#9c9;}
+.msg.err{background:rgba(80,40,40,0.4);color:#c99;}
 </style></head><body>
-<h1>e-Paper Photo Display</h1>
-<div class="section orientation-section">
-  <label>Preview orientation</label>
+<header>
+  <h1>e-Paper Photo Display</h1>
+  <p class="subtitle">Send images or text to your 13.3\u201d display</p>
+</header>
+
+<div class="howto">
+  <strong>How to use</strong>
+  <ol>
+    <li>Set <strong>Preview orientation</strong> to match how your display is mounted (portrait or landscape).</li>
+    <li>Load content: choose an <strong>image</strong> (file or URL) or type <strong>text</strong>, then click Load.</li>
+    <li>Optional: rotate, crop, or use \u201cCrop to fill screen\u201d in the preview.</li>
+    <li>Click <strong>Display on e-paper</strong> to send to the display (~19s refresh).</li>
+  </ol>
+</div>
+
+<div class="card">
+  <div class="card-title">1. Preview orientation</div>
   <div class="orientation-row">
     <button type="button" id="oriPortrait" class="btn-ori">Portrait</button>
     <button type="button" id="oriLandscape" class="btn-ori active">Landscape</button>
   </div>
-  <p class="preview-caption" style="margin-top:0.25rem;">Match how your display is mounted. Portrait = tall; Landscape = wide.</p>
+  <p class="preview-caption">Portrait = tall; Landscape = wide. Pick what matches your display.</p>
 </div>
-<div class="section">
-  <label>Image source</label>
+
+<div class="card">
+  <div class="card-title">2a. Image (file or URL)</div>
   <div class="source-row">
-    <input type="file" id="fileIn" accept="image/*">
-    <span class="or">or</span>
-    <input type="url" id="urlIn" placeholder="https://example.com/photo.jpg">
-    <button type="button" id="loadBtn" class="btn-display">Load</button>
+    <input type="file" id="fileIn" accept="image/*" aria-label="Choose image file">
+    <span class="divider">or</span>
+    <input type="url" id="urlIn" placeholder="Paste image URL">
+    <button type="button" id="loadBtn" class="btn-primary">Load image</button>
   </div>
 </div>
-<div class="section text-section">
-  <label>Or type text to display</label>
-  <textarea id="textIn" placeholder="Type your message here..."></textarea>
+
+<div class="card">
+  <div class="card-title">2b. Or type text</div>
+  <textarea id="textIn" placeholder="Type your message here..." rows="3"></textarea>
   <div class="text-row">
     <label>Font size</label>
-    <input type="number" id="fontSize" min="24" max="200" value="72">
-    <button type="button" id="loadTextBtn" class="btn-display">Load text</button>
+    <input type="number" id="fontSize" min="24" max="200" value="72" aria-label="Font size">
+    <button type="button" id="loadTextBtn" class="btn-primary">Load text</button>
   </div>
 </div>
+
 <div class="preview-wrap" id="previewWrap">
-  <p class="preview-caption">Preview (display 1200\u00d71600)</p>
-  <canvas id="preview" width="400" height="300"></canvas>
-  <div class="controls">
-    <div class="row"><label>Rotate</label><button type="button" id="rotL">\u21b6 Left</button><button type="button" id="rotR">Right \u21b7</button></div>
-    <label>Crop in: <span id="cropPct">100</span>%</label>
-    <input type="range" id="cropSl" min="25" max="100" value="100" step="5">
-    <div class="row"><button type="button" id="fillBtn" class="btn-display">Crop to fill screen</button></div>
+  <div class="card">
+    <div class="card-title">3. Preview &amp; adjust</div>
+    <p class="preview-caption">This is how it will look on the display (1200\u00d71600).</p>
+    <canvas id="preview" width="400" height="300"></canvas>
+    <div class="controls">
+      <div class="row"><label>Rotate</label><button type="button" id="rotL" class="btn-secondary">\u21b6 Left</button><button type="button" id="rotR" class="btn-secondary">Right \u21b7</button></div>
+      <label>Crop in: <span id="cropPct">100</span>%</label>
+      <input type="range" id="cropSl" min="25" max="100" value="100" step="5" aria-label="Crop amount">
+      <div class="row"><button type="button" id="fillBtn" class="btn-secondary">Crop to fill screen</button></div>
+    </div>
+    <button type="button" id="displayBtn" class="btn-primary" disabled>4. Display on e-paper</button>
   </div>
-  <button type="button" id="displayBtn" class="btn-display" disabled>Display on e-paper</button>
 </div>
-<form method="post" action="/clear" style="display:inline;">
-  <button type="submit" class="btn-clear">Clear screen</button>
-</form>
-<p style="color:#666;font-size:0.85rem;">Refresh takes ~19s. <a href="/api/docs" style="color:#6af;">API docs</a></p>
-<div id="msg" class="msg" style="display:none;"></div>
+
+<div class="actions">
+  <form method="post" action="/clear" style="display:inline;">
+    <button type="submit" class="btn-secondary">Clear screen</button>
+  </form>
+</div>
+
+<div class="footer">
+  Display refresh takes about 19 seconds. <a href="/api/docs">API docs</a>
+</div>
+<div id="msg" class="msg"></div>
 <script>
 console.log("[epaper] Script loaded");
 (function(){
   var q = new URLSearchParams(location.search);
   var m = document.getElementById("msg");
-  if (q.get("display") === "ok") { m.className = "msg ok"; m.style.display = "block"; m.textContent = "Display updating (~19s)."; }
-  if (q.get("display") === "err") { m.className = "msg err"; m.style.display = "block"; m.textContent = "Display failed."; }
-  if (q.get("clear") === "ok") { m.className = "msg ok"; m.style.display = "block"; m.textContent = "Screen cleared."; }
-  if (q.get("clear") === "err") { m.className = "msg err"; m.style.display = "block"; m.textContent = "Clear failed."; }
+  if (!m) return;
+  if (q.get("display") === "ok") { m.className = "msg ok show"; m.textContent = "Display updating. Refresh takes ~19s."; }
+  if (q.get("display") === "err") { m.className = "msg err show"; m.textContent = "Display failed. Check the image or try again."; }
+  if (q.get("clear") === "ok") { m.className = "msg ok show"; m.textContent = "Screen cleared."; }
+  if (q.get("clear") === "err") { m.className = "msg err show"; m.textContent = "Clear failed."; }
 })();
 var DISP_W = 1200, DISP_H = 1600, ASPECT = DISP_W / DISP_H;
 var rot = 0, crop = 1, fillMode = false, imgEl = null, currentFile = null, currentUrl = null, currentText = null, currentFontSize = 72;
 var previewOrientation = "landscape";
-function initUI(){
-  console.log("[epaper] initUI called");
-  var loadBtn = document.getElementById("loadBtn");
-  var fileIn = document.getElementById("fileIn");
-  var urlIn = document.getElementById("urlIn");
-  console.log("[epaper] loadBtn=" + (loadBtn ? "found" : "NULL"), "fileIn=" + (fileIn ? "found" : "NULL"), "urlIn=" + (urlIn ? "found" : "NULL"));
 function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
 function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
-function setFill(v){ fillMode = !!v; document.getElementById("fillBtn").textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
-function syncRotCrop(){ document.getElementById("cropPct").textContent = Math.round(crop * 100); }
-function showPreview(){ console.log("[epaper] showPreview"); document.getElementById("previewWrap").classList.add("show"); document.getElementById("displayBtn").disabled = false; }
+function setFill(v){ fillMode = !!v; var fb = document.getElementById("fillBtn"); if (fb) fb.textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
+function syncRotCrop(){ var cp = document.getElementById("cropPct"); if (cp) cp.textContent = Math.round(crop * 100); }
+function showPreview(){ console.log("[epaper] showPreview"); var pw = document.getElementById("previewWrap"); var db = document.getElementById("displayBtn"); if (pw) pw.classList.add("show"); if (db) db.disabled = false; }
 function loadImage(src, isBlobUrl){
   console.log("[epaper] loadImage called, isBlobUrl=" + isBlobUrl, typeof src);
   if (imgEl && isBlobUrl && imgEl.src && imgEl.src.indexOf("blob:") === 0) URL.revokeObjectURL(imgEl.src);
   imgEl = new Image();
-  imgEl.onload = function(){ console.log("[epaper] image onload, size=" + imgEl.naturalWidth + "x" + imgEl.naturalHeight); rot = 0; crop = 1; fillMode = false; setFill(false); document.getElementById("cropSl").value = 100; syncRotCrop(); drawPreview(); showPreview(); };
+  imgEl.onload = function(){ console.log("[epaper] image onload, size=" + imgEl.naturalWidth + "x" + imgEl.naturalHeight); rot = 0; crop = 1; fillMode = false; setFill(false); var cs = document.getElementById("cropSl"); if (cs) cs.value = 100; syncRotCrop(); drawPreview(); showPreview(); };
   imgEl.onerror = function(){ console.log("[epaper] image onerror"); alert("Failed to load image"); };
   imgEl.src = src;
   console.log("[epaper] imgEl.src set");
@@ -425,6 +455,7 @@ function drawPreview(){
   octx.fillRect(0, 0, DISP_W, DISP_H);
   octx.drawImage(temp, sx, sy, cw, ch, dx, dy, dw, dh);
   var c = document.getElementById("preview");
+  if (!c) return;
   var scale = 0.25;
   if (previewOrientation === "portrait") {
     c.width = 300; c.height = 400;
@@ -445,76 +476,77 @@ function drawPreview(){
     ctx.restore();
   }
 }
-  loadBtn.onclick = function(e){
+function setPreviewOrientation(ori){
+  previewOrientation = ori;
+  var op = document.getElementById("oriPortrait"), ol = document.getElementById("oriLandscape");
+  if (op) op.classList.toggle("active", ori === "portrait");
+  if (ol) ol.classList.toggle("active", ori === "landscape");
+  drawPreview();
+}
+document.body.addEventListener("click", function(e){
+  var id = e.target && e.target.id;
+  if (!id) return;
+  if (e.target.tagName !== "BUTTON" && e.target.tagName !== "INPUT") return;
+  if (id === "loadBtn") {
+    e.preventDefault();
     console.log("[epaper] Load clicked");
-    if (e && e.preventDefault) e.preventDefault();
     var fileInput = document.getElementById("fileIn");
     var urlInput = document.getElementById("urlIn");
     var f = fileInput && fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
     var u = (urlInput && urlInput.value) ? String(urlInput.value).trim() : "";
-    console.log("[epaper] file selected=" + (f ? f.name + " " + f.size + " bytes" : "none"), "url=" + (u ? u.substring(0,50) + "..." : "empty"));
+    console.log("[epaper] file=" + (f ? f.name : "none"), "url=" + (u ? "set" : "empty"));
     if (f) {
-      console.log("[epaper] Loading from file");
       currentFile = f; currentUrl = null; currentText = null;
       loadImage(URL.createObjectURL(f), true);
     } else if (u) {
-      console.log("[epaper] Loading from URL");
       currentFile = null; currentUrl = u; currentText = null;
-      this.disabled = true; this.textContent = "Loading...";
-      fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ console.log("[epaper] fetch status=" + r.status); if (!r.ok) throw new Error(r.status); return r.blob(); }).then(function(blob){ console.log("[epaper] blob size=" + blob.size); loadImage(URL.createObjectURL(blob), true); document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load"; }).catch(function(err){ console.log("[epaper] fetch error", err); document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load"; alert("Failed to load image"); });
-    } else {
-      console.log("[epaper] No file or URL");
-      alert("Choose a file or enter a URL");
-    }
-  };
-  console.log("[epaper] loadBtn.onclick assigned");
-document.getElementById("loadTextBtn").onclick = function(){
-  var text = document.getElementById("textIn").value.trim();
-  if (!text) { alert("Enter some text"); return; }
-  var fs = parseInt(document.getElementById("fontSize").value, 10) || 72;
-  fs = Math.max(24, Math.min(200, fs));
-  currentFile = null; currentUrl = null; currentText = text; currentFontSize = fs;
-  loadImage(renderTextToCanvas(text, fs), true);
-};
-function setPreviewOrientation(ori){
-  previewOrientation = ori;
-  document.getElementById("oriPortrait").classList.toggle("active", ori === "portrait");
-  document.getElementById("oriLandscape").classList.toggle("active", ori === "landscape");
-  drawPreview();
-}
-document.getElementById("oriPortrait").onclick = function(){ setPreviewOrientation("portrait"); };
-document.getElementById("oriLandscape").onclick = function(){ setPreviewOrientation("landscape"); };
-document.getElementById("rotL").onclick = function(){ setRot(-90); };
-document.getElementById("rotR").onclick = function(){ setRot(90); };
-document.getElementById("cropSl").oninput = function(){ setCrop(this.value / 100); };
-document.getElementById("fillBtn").onclick = function(){ setFill(!fillMode); };
-document.getElementById("displayBtn").onclick = function(){
-  var btn = this;
-  btn.disabled = true;
-  function done(r){ r.text().then(function(html){ document.open(); document.write(html); document.close(); }).catch(function(){ btn.disabled = false; }); }
-  if (currentFile) {
-    var fd = new FormData();
-    fd.append("photo", currentFile);
-    fd.append("rotation", String(rot));
-    fd.append("crop", String(crop));
-    fd.append("fill", fillMode ? "1" : "0");
-    fetch("/display", { method: "POST", body: fd }).then(done).catch(function(){ btn.disabled = false; });
-  } else if (currentUrl) {
-    var body = "url=" + encodeURIComponent(currentUrl) + "&rotation=" + rot + "&crop=" + crop + "&fill=" + (fillMode ? "1" : "0");
-    fetch("/display_url", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
-  } else if (currentText) {
-    var body = "text=" + encodeURIComponent(currentText) + "&font_size=" + currentFontSize;
-    fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
+      e.target.disabled = true; e.target.textContent = "Loading...";
+      fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ if (!r.ok) throw new Error(); return r.blob(); }).then(function(blob){ loadImage(URL.createObjectURL(blob), true); e.target.disabled = false; e.target.textContent = "Load"; }).catch(function(){ e.target.disabled = false; e.target.textContent = "Load"; alert("Failed to load image"); });
+    } else { alert("Choose a file or enter a URL"); }
+    return;
   }
-};
-}
-if (document.readyState === "loading") {
-  console.log("[epaper] Waiting for DOMContentLoaded");
-  document.addEventListener("DOMContentLoaded", function(){ console.log("[epaper] DOMContentLoaded"); try { initUI(); } catch (err) { console.error("[epaper] initUI error", err); } });
-} else {
-  console.log("[epaper] DOM already ready, calling initUI");
-  try { initUI(); } catch (err) { console.error("[epaper] initUI error", err); }
-}
+  if (id === "loadTextBtn") {
+    e.preventDefault();
+    var textIn = document.getElementById("textIn");
+    var fontSizeIn = document.getElementById("fontSize");
+    var text = textIn ? textIn.value.trim() : "";
+    if (!text) { alert("Enter some text"); return; }
+    var fs = fontSizeIn ? parseInt(fontSizeIn.value, 10) : 72;
+    fs = Math.max(24, Math.min(200, fs || 72));
+    currentFile = null; currentUrl = null; currentText = text; currentFontSize = fs;
+    loadImage(renderTextToCanvas(text, fs), true);
+    return;
+  }
+  if (id === "oriPortrait") { e.preventDefault(); setPreviewOrientation("portrait"); return; }
+  if (id === "oriLandscape") { e.preventDefault(); setPreviewOrientation("landscape"); return; }
+  if (id === "rotL") { e.preventDefault(); setRot(-90); return; }
+  if (id === "rotR") { e.preventDefault(); setRot(90); return; }
+  if (id === "fillBtn") { e.preventDefault(); setFill(!fillMode); return; }
+  if (id === "displayBtn") {
+    e.preventDefault();
+    var btn = e.target;
+    btn.disabled = true;
+    function done(r){ r.text().then(function(html){ document.open(); document.write(html); document.close(); }).catch(function(){ btn.disabled = false; }); }
+    if (currentFile) {
+      var fd = new FormData();
+      fd.append("photo", currentFile);
+      fd.append("rotation", String(rot));
+      fd.append("crop", String(crop));
+      fd.append("fill", fillMode ? "1" : "0");
+      fetch("/display", { method: "POST", body: fd }).then(done).catch(function(){ btn.disabled = false; });
+    } else if (currentUrl) {
+      var body = "url=" + encodeURIComponent(currentUrl) + "&rotation=" + rot + "&crop=" + crop + "&fill=" + (fillMode ? "1" : "0");
+      fetch("/display_url", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
+    } else if (currentText) {
+      var body = "text=" + encodeURIComponent(currentText) + "&font_size=" + currentFontSize;
+      fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
+    }
+  }
+});
+document.body.addEventListener("input", function(e){
+  if (e.target && e.target.id === "cropSl") setCrop(parseFloat(e.target.value, 10) / 100);
+});
+console.log("[epaper] Event listeners attached");
 </script>
 </body></html>
 """
@@ -725,7 +757,11 @@ def run_server():
     print("  Web UI: upload photo, Clear screen button")
     print("  API: POST /api/upload (multipart 'photo' or raw image), POST /api/clear")
     print("  From another device: http://<pi-ip>:%s" % port)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        sys.exit(0)
 
 
 def main():
