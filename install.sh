@@ -11,7 +11,14 @@ WAVESHARE_EPD="${WAVESHARE_LIB}/waveshare_epd"
 echo "[1/8] Updating system and installing packages..."
 sudo apt-get update
 # Use apt for Python deps to avoid PEP 668 externally-managed-environment (no venv)
-sudo apt-get install -y python3 python3-pil python3-numpy python3-spidev python3-flask python3-rpi.gpio git unzip wget
+# Pi 5 uses a different SoC; RPi.GPIO fails with "Cannot determine SOC peripheral base address". Use rpi-lgpio.
+if grep -q "Raspberry Pi 5" /proc/device-tree/model 2>/dev/null; then
+  echo "  Detected Raspberry Pi 5: using python3-rpi-lgpio (RPi.GPIO not supported on Pi 5)."
+  sudo apt-get remove -y python3-rpi.gpio 2>/dev/null || true
+  sudo apt-get install -y python3 python3-pil python3-numpy python3-spidev python3-flask python3-rpi-lgpio git unzip wget
+else
+  sudo apt-get install -y python3 python3-pil python3-numpy python3-spidev python3-flask python3-rpi.gpio git unzip wget
+fi
 
 echo "[2/8] Enabling SPI..."
 sudo raspi-config nonint do_spi 0

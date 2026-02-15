@@ -1,14 +1,16 @@
 # E-paper image server
 
-Web server that accepts image uploads and displays them on a **Waveshare 13.3" E Ink Spectra 6 (E6) Full Color** e-paper display (1600×1200, SPI, HAT+ Standard Driver HAT). Runs bare metal on a Raspberry Pi (e.g. Pi Zero 2 W) with wall power.
+Web server that accepts image uploads and displays them on a **Waveshare 13.3" E Ink Spectra 6 (E6) Full Color** e-paper display (1600×1200, SPI, HAT+ Standard Driver HAT). Runs bare metal on a Raspberry Pi (e.g. Pi Zero 2 W or Pi 5) with wall power.
 
 **Reference:** [Waveshare 13.3inch e-Paper HAT+ (E) Manual – Raspberry Pi](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi)
 
 ---
 
-## Install on a new Raspberry Pi Zero 2 W
+## Install on a new Raspberry Pi (Zero 2 W or Pi 5)
 
 Use a fresh Raspberry Pi OS (64-bit) image. Connect to the Pi over SSH (or keyboard/monitor).
+
+**Using Raspberry Pi 5:** Same install and app; only these differ: (1) **Power** — use the **official Raspberry Pi USB-C PSU** (5 V 5 A). (2) **config.txt** — on current OS it’s `/boot/firmware/config.txt`; install.sh adds the GPIO lines there. (3) **Swap** — optional on Pi 5 (4 GB+ RAM); you can skip step 0 swap or still add it. (4) **GPIO** — the classic RPi.GPIO library does not support Pi 5’s SoC; install.sh detects Pi 5 and installs **python3-rpi-lgpio** (drop-in replacement) instead. If you see `RuntimeError: Cannot determine SOC peripheral base address`, run `sudo apt install python3-rpi-lgpio` and `sudo apt remove python3-rpi.gpio`, then try again. (5) GPIO/SPI pinout is the same; the HAT uses the same 40-pin header.
 
 ### Install your SSH key (passwordless login)
 
@@ -110,11 +112,6 @@ gh auth login
 cd ~
 gh repo clone TheDominator54/epaper
 cd epaper
-```
-
-### 4. Run the install script
-
-```bash
 chmod +x install.sh troubleshoot.sh enable-boot.sh
 ./install.sh
 ```
@@ -163,11 +160,6 @@ Before using the web app, test the display with the **official Waveshare demo** 
 cd ~
 wget "https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip" -O 13.3inch_e-Paper_E.zip
 unzip 13.3inch_e-Paper_E.zip -d 13.3inch_e-Paper_E
-```
-
-**Install Python libraries (if not already installed):**
-
-```bash
 sudo apt-get update
 sudo apt-get install -y python3-pil python3-numpy python3-spidev
 ```
@@ -332,14 +324,17 @@ If the app or `./scripts/run_epd_demo.sh` reports success and you see “Display
 5. **Stuck at “e-Paper busy”**
    - Check wiring and SPI. Ensure BUSY is connected and epdconfig uses BCM 24 for BUSY. If the driver board has a power switch, a long reset can cut power; keep reset low duration short.
 
-6. **Run the official demo**
+6. **Pi 5: `RuntimeError: Cannot determine SOC peripheral base address`**
+   - On Raspberry Pi 5, the classic RPi.GPIO library is not supported. Use the drop-in replacement: `sudo apt install python3-rpi-lgpio` and `sudo apt remove python3-rpi.gpio`, then run the demo or app again. `install.sh` does this automatically when it detects a Pi 5.
+
+7. **Run the official demo**
    - Download the [Waveshare 13.3" E demo](https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip), unzip, then from `13.3inch_e-Paper_E/RaspberryPi/python/examples/` run `python3 epd_13in3E_test.py` (with their lib on `PYTHONPATH`). If the **official** demo also shows nothing, the issue is hardware or wiring; if it works, the issue is our epdconfig or driver usage.
 
 ---
 
 ## Prerequisites
 
-- Raspberry Pi (e.g. Pi Zero 2 W) with Raspberry Pi OS (64-bit)
+- Raspberry Pi (e.g. Pi Zero 2 W or Pi 5) with Raspberry Pi OS (64-bit)
 - Waveshare 13.3" E Ink Spectra 6 (E6) display with HAT+ Driver HAT
 - SPI enabled (done by `install.sh`)
 - Wall power (no battery)
