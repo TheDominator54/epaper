@@ -1,0 +1,2 @@
+# Ensure shell scripts always use LF (fixes "bash\r: No such file or directory" on Linux)
+*.sh text eol=lf
