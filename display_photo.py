@@ -26,7 +26,7 @@ if os.path.exists(_libdir):
     sys.path.insert(0, _libdir)
 
 import epd13in3E
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 EPD_WIDTH = 1200
 EPD_HEIGHT = 1600
@@ -99,6 +99,50 @@ def clear_epd():
     get_epd().Clear()
 
 
+def _text_size(draw, s, font):
+    bbox = draw.textbbox((0, 0), s, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def render_text_to_image(text, font_size=72):
+    """Draw text wrapped and centered on a 1200x1600 white image. Returns RGB Image."""
+    canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    max_w = EPD_WIDTH - 80
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+    except (OSError, IOError):
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+    line_height = font_size + font_size // 4
+    lines = []
+    for para in (text or "").strip().split("\n"):
+        words = para.split()
+        current = []
+        for word in words:
+            trial = " ".join(current + [word]) if current else word
+            w, _ = _text_size(draw, trial, font)
+            if w > max_w and current:
+                lines.append(" ".join(current))
+                current = [word]
+            else:
+                current.append(word)
+        if current:
+            lines.append(" ".join(current))
+    if not lines:
+        lines = [""]
+    total_h = len(lines) * line_height
+    y = (EPD_HEIGHT - total_h) // 2
+    for line in lines:
+        line_w, _ = _text_size(draw, line, font)
+        x = (EPD_WIDTH - line_w) // 2
+        draw.text((x, y), line, fill=(0, 0, 0), font=font)
+        y += line_height
+    return canvas
+
+
 def parse_multipart_form(rfile, content_type, content_length):
     """Parse multipart/form-data. Returns (photo_bytes or None, fields_dict)."""
     m = re.search(r'boundary=([^;\s]+)', content_type)
@@ -137,6 +181,76 @@ def parse_multipart_form(rfile, content_type, content_length):
     return photo, fields
 
 
+API_DOCS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Docs – e-Paper Photo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; background: #1a1a1a; color: #e0e0e0; line-height: 1.5; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.1rem; margin-top: 1.5rem; color: #aaa; }
+    p, li { color: #ccc; }
+    code { background: #333; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em; }
+    pre { background: #252525; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; }
+    .method { color: #7af; }
+    .path { color: #afa; }
+    table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #333; }
+    th { color: #888; font-weight: 600; }
+    a { color: #7af; }
+  </style>
+</head>
+<body>
+  <h1>e-Paper Photo API</h1>
+  <p>JSON responses use <code>{"ok": true|false, "message"?: "...", "error"?: "..."}</code>.</p>
+
+  <h2>POST /api/upload</h2>
+  <p>Display an image on the e-paper. Refresh takes ~19s.</p>
+  <p><strong>Request:</strong></p>
+  <ul>
+    <li><strong>Multipart form:</strong> <code>photo</code> (file, required). Optional: <code>rotation</code> (0|90|180|270), <code>crop</code> (0.25–1.0, center crop %), <code>fill</code> (1|on|true to crop to 3:4 and fill screen).</li>
+    <li><strong>Raw image:</strong> Body = image bytes, <code>Content-Type: image/jpeg</code> (or image/png, etc.). No form fields in this case.</li>
+  </ul>
+  <p><strong>Example (curl, multipart):</strong></p>
+  <pre>curl -X POST -F "photo=@/path/to/image.jpg" -F "rotation=90" -F "crop=0.8" -F "fill=0" http://localhost:5000/api/upload</pre>
+  <p><strong>Example (curl, raw image):</strong></p>
+  <pre>curl -X POST -H "Content-Type: image/jpeg" --data-binary @image.jpg http://localhost:5000/api/upload</pre>
+  <p><strong>Success:</strong> <code>200 {"ok": true, "message": "Display updating (~19s)"}</code></p>
+  <p><strong>Error:</strong> <code>400</code> or <code>500</code> with <code>{"ok": false, "error": "..."}</code></p>
+
+  <h2>POST /api/clear</h2>
+  <p>Clear the e-paper display.</p>
+  <p><strong>Request:</strong> No body.</p>
+  <p><strong>Example:</strong></p>
+  <pre>curl -X POST http://localhost:5000/api/clear</pre>
+  <p><strong>Success:</strong> <code>200 {"ok": true, "message": "Screen cleared"}</code></p>
+
+  <h2>POST /display_text</h2>
+  <p>Display text on the e-paper (wrapped and centered). Web UI uses this for the text source.</p>
+  <p><strong>Request:</strong> <code>application/x-www-form-urlencoded</code> with <code>text</code> (required) and optional <code>font_size</code> (default 72, range 12–200).</p>
+  <p><strong>Example:</strong></p>
+  <pre>curl -X POST -d "text=Hello%20world" -d "font_size=72" http://localhost:5000/display_text</pre>
+  <p>Redirects to <code>/?display=ok</code> or <code>/?display=err</code>.</p>
+
+  <h2>GET /preview?url=...</h2>
+  <p>Proxy an image from a URL. Use to load an image in the browser for preview.</p>
+  <p><strong>Query:</strong></p>
+  <table>
+    <tr><th>Param</th><th>Description</th></tr>
+    <tr><td><code>url</code></td><td>Image URL (required, encoded).</td></tr>
+  </table>
+  <p><strong>Example:</strong></p>
+  <pre>GET /preview?url=https%3A%2F%2Fexample.com%2Fphoto.jpg</pre>
+  <p>Returns the image bytes with appropriate <code>Content-Type</code>, or <code>502</code> if the URL cannot be fetched.</p>
+
+  <p style="margin-top: 2rem;"><a href="/">← Back to Web UI</a></p>
+</body>
+</html>
+"""
+
+
 HTML_PAGE = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>e-Paper Photo</title>
 <style>
@@ -160,51 +274,59 @@ label{font-size:0.85rem;color:#999;}
 .preview-wrap{display:none;}
 .preview-wrap.show{display:block;}
 .preview-caption{font-size:0.75rem;color:#666;margin-bottom:0.25rem;}
+.source-row{display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin:0.5rem 0;}
+.source-row input[type="file"]{flex:0 0 auto;}
+.source-row input[type="url"]{flex:1;min-width:140px;}
+.source-row .or{color:#666;font-size:0.9rem;}
+#displayBtn{margin-top:0.75rem;}
+.text-section{margin-top:1rem;}
+#textIn{width:100%;min-height:80px;padding:0.5rem;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#ddd;font:inherit;resize:vertical;box-sizing:border-box;}
+.text-row{display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;}
+.text-row label{flex:0 0 auto;}
+#fontSize{width:4em;}
+.orientation-row{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;}
+.orientation-row .btn-ori{padding:0.4rem 0.75rem;font-size:0.9rem;background:#333;color:#ddd;border:1px solid #555;border-radius:6px;cursor:pointer;}
+.orientation-row .btn-ori.active{background:#07c;border-color:#07c;color:#fff;}
 </style></head><body>
 <h1>e-Paper Photo Display</h1>
 <div class="section">
-  <label>Upload image</label>
-  <form id="formFile" method="post" action="/display" enctype="multipart/form-data">
-    <input type="file" name="photo" id="fileIn" accept="image/*" required><br>
-    <div class="preview-wrap" id="previewWrap">
-      <p class="preview-caption">Preview (display 1200\u00d71600, rotated 90\u00b0 CCW)</p>
-      <canvas id="preview" width="400" height="300"></canvas>
-      <div class="controls">
-        <div class="row"><label>Rotate</label><button type="button" id="rotL">\u21b6 Left</button><button type="button" id="rotR">Right \u21b7</button></div>
-        <label>Crop in: <span id="cropPct">100</span>%</label>
-        <input type="range" id="cropSl" min="25" max="100" value="100" step="5">
-        <div class="row"><button type="button" id="fillBtn" class="btn-display">Crop to fill screen</button></div>
-        <input type="hidden" name="rotation" id="rotVal" value="0">
-        <input type="hidden" name="crop" id="cropVal" value="1">
-        <input type="hidden" name="fill" id="fillVal" value="0">
-      </div>
-    </div>
-    <button type="submit" class="btn-display">Display on e-paper</button>
-  </form>
+  <label>Image source</label>
+  <div class="source-row">
+    <input type="file" id="fileIn" accept="image/*">
+    <span class="or">or</span>
+    <input type="url" id="urlIn" placeholder="https://example.com/photo.jpg">
+    <button type="button" id="loadBtn" class="btn-display">Load</button>
+  </div>
 </div>
-<div class="section">
-  <label>Or paste image URL</label>
-  <form id="formUrl" method="post" action="/display_url">
-    <input type="url" name="url" id="urlIn" placeholder="https://example.com/photo.jpg" required><br>
-    <div class="row" style="margin:0.5rem 0;">
-      <button type="button" id="downloadPreviewBtn" class="btn-display">Download preview</button>
-    </div>
-    <div class="controls">
-      <div class="row"><label>Rotate</label><button type="button" id="rotL2">\u21b6 Left</button><button type="button" id="rotR2">Right \u21b7</button></div>
-      <label>Crop in: <span id="cropPct2">100</span>%</label>
-      <input type="range" id="cropSl2" min="25" max="100" value="100" step="5">
-      <div class="row"><button type="button" id="fillBtn2" class="btn-display">Crop to fill screen</button></div>
-      <input type="hidden" name="rotation" id="rotVal2" value="0">
-      <input type="hidden" name="crop" id="cropVal2" value="1">
-      <input type="hidden" name="fill" id="fillVal2" value="0">
-    </div>
-    <button type="submit" class="btn-display">Display from URL</button>
-  </form>
+<div class="section text-section">
+  <label>Or type text to display</label>
+  <textarea id="textIn" placeholder="Type your message here..."></textarea>
+  <div class="text-row">
+    <label>Font size</label>
+    <input type="number" id="fontSize" min="24" max="200" value="72">
+    <button type="button" id="loadTextBtn" class="btn-display">Load text</button>
+  </div>
+</div>
+<div class="preview-wrap" id="previewWrap">
+  <p class="preview-caption">Preview (display 1200\u00d71600)</p>
+  <div class="orientation-row">
+    <label>Orientation:</label>
+    <button type="button" id="oriPortrait" class="btn-ori">Portrait</button>
+    <button type="button" id="oriLandscape" class="btn-ori active">Landscape</button>
+  </div>
+  <canvas id="preview" width="400" height="300"></canvas>
+  <div class="controls">
+    <div class="row"><label>Rotate</label><button type="button" id="rotL">\u21b6 Left</button><button type="button" id="rotR">Right \u21b7</button></div>
+    <label>Crop in: <span id="cropPct">100</span>%</label>
+    <input type="range" id="cropSl" min="25" max="100" value="100" step="5">
+    <div class="row"><button type="button" id="fillBtn" class="btn-display">Crop to fill screen</button></div>
+  </div>
+  <button type="button" id="displayBtn" class="btn-display" disabled>Display on e-paper</button>
 </div>
 <form method="post" action="/clear" style="display:inline;">
   <button type="submit" class="btn-clear">Clear screen</button>
 </form>
-<p style="color:#666;font-size:0.85rem;">Refresh takes ~19s.</p>
+<p style="color:#666;font-size:0.85rem;">Refresh takes ~19s. <a href="/api/docs" style="color:#6af;">API docs</a></p>
 <div id="msg" class="msg" style="display:none;"></div>
 <script>
 (function(){
@@ -216,14 +338,50 @@ label{font-size:0.85rem;color:#999;}
   if (q.get("clear") === "err") { m.className = "msg err"; m.style.display = "block"; m.textContent = "Clear failed."; }
 })();
 var DISP_W = 1200, DISP_H = 1600, ASPECT = DISP_W / DISP_H;
-var rot = 0, crop = 1, fillMode = false, imgEl = null;
+var rot = 0, crop = 1, fillMode = false, imgEl = null, currentFile = null, currentUrl = null, currentText = null, currentFontSize = 72;
+var previewOrientation = "landscape";
 function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
 function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
-function setFill(v){ fillMode = !!v; document.getElementById("fillVal").value = document.getElementById("fillVal2").value = fillMode ? "1" : "0"; document.getElementById("fillBtn").textContent = document.getElementById("fillBtn2").textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
-function syncRotCrop(){
-  document.getElementById("rotVal").value = document.getElementById("rotVal2").value = rot;
-  document.getElementById("cropVal").value = document.getElementById("cropVal2").value = crop;
-  document.getElementById("cropPct").textContent = document.getElementById("cropPct2").textContent = Math.round(crop * 100);
+function setFill(v){ fillMode = !!v; document.getElementById("fillBtn").textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
+function syncRotCrop(){ document.getElementById("cropPct").textContent = Math.round(crop * 100); }
+function showPreview(){ document.getElementById("previewWrap").classList.add("show"); document.getElementById("displayBtn").disabled = false; }
+function loadImage(src, isBlobUrl){
+  if (imgEl && isBlobUrl && imgEl.src && imgEl.src.indexOf("blob:") === 0) URL.revokeObjectURL(imgEl.src);
+  imgEl = new Image();
+  imgEl.onload = function(){ rot = 0; crop = 1; fillMode = false; setFill(false); document.getElementById("cropSl").value = 100; syncRotCrop(); drawPreview(); showPreview(); };
+  imgEl.onerror = function(){ alert("Failed to load image"); };
+  imgEl.src = src;
+}
+function renderTextToCanvas(text, fontSize){
+  var c = document.createElement("canvas");
+  c.width = DISP_W; c.height = DISP_H;
+  var ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, DISP_W, DISP_H);
+  ctx.fillStyle = "#000";
+  ctx.font = fontSize + "px sans-serif";
+  ctx.textBaseline = "top";
+  var maxW = DISP_W - 80, lineHeight = fontSize + Math.floor(fontSize/4), lines = [];
+  var paras = (text || "").trim().split("\n");
+  for (var p = 0; p < paras.length; p++) {
+    var words = paras[p].split(/\s+/);
+    var cur = [];
+    for (var i = 0; i < words.length; i++) {
+      var trial = (cur.length ? cur.join(" ") + " " : "") + words[i];
+      var m = ctx.measureText(trial);
+      if (m.width > maxW && cur.length) { lines.push(cur.join(" ")); cur = [words[i]]; } else cur.push(words[i]);
+    }
+    if (cur.length) lines.push(cur.join(" "));
+  }
+  if (!lines.length) lines = [""];
+  var totalH = lines.length * lineHeight;
+  var y = (DISP_H - totalH) / 2;
+  for (var j = 0; j < lines.length; j++) {
+    var m2 = ctx.measureText(lines[j]);
+    ctx.fillText(lines[j], (DISP_W - m2.width) / 2, y);
+    y += lineHeight;
+  }
+  return c.toDataURL("image/png");
 }
 function drawPreview(){
   if (!imgEl || !imgEl.complete) return;
@@ -254,45 +412,79 @@ function drawPreview(){
   octx.fillRect(0, 0, DISP_W, DISP_H);
   octx.drawImage(temp, sx, sy, cw, ch, dx, dy, dw, dh);
   var c = document.getElementById("preview");
-  c.width = 400; c.height = 300;
-  var ctx = c.getContext("2d");
-  ctx.fillStyle = "#222";
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.save();
-  ctx.translate(200, 150);
-  ctx.rotate(-90 * Math.PI / 180);
-  ctx.scale(0.25, 0.25);
-  ctx.drawImage(off, 0, 0, DISP_W, DISP_H, -DISP_W/2, -DISP_H/2, DISP_W, DISP_H);
-  ctx.restore();
+  var scale = 0.25;
+  if (previewOrientation === "portrait") {
+    c.width = 300; c.height = 400;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(off, 0, 0, DISP_W, DISP_H, 0, 0, 300, 400);
+  } else {
+    c.width = 400; c.height = 300;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.save();
+    ctx.translate(200, 150);
+    ctx.rotate(-90 * Math.PI / 180);
+    ctx.scale(scale, scale);
+    ctx.drawImage(off, 0, 0, DISP_W, DISP_H, -DISP_W/2, -DISP_H/2, DISP_W, DISP_H);
+    ctx.restore();
+  }
 }
-document.getElementById("fileIn").onchange = function(){
-  var f = this.files[0];
-  if (!f) { document.getElementById("previewWrap").classList.remove("show"); return; }
-  document.getElementById("previewWrap").classList.add("show");
-  imgEl = new Image();
-  imgEl.onload = function(){ rot = 0; crop = 1; fillMode = false; setFill(false); document.getElementById("cropSl").value = document.getElementById("cropSl2").value = 100; syncRotCrop(); drawPreview(); };
-  imgEl.src = URL.createObjectURL(f);
+document.getElementById("loadBtn").onclick = function(){
+  var f = document.getElementById("fileIn").files[0];
+  var u = document.getElementById("urlIn").value.trim();
+  if (f) {
+    currentFile = f; currentUrl = null; currentText = null;
+    loadImage(URL.createObjectURL(f), true);
+  } else if (u) {
+    currentFile = null; currentUrl = u; currentText = null;
+    this.disabled = true; this.textContent = "Loading...";
+    fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ if (!r.ok) throw new Error(); return r.blob(); }).then(function(blob){
+      loadImage(URL.createObjectURL(blob), true);
+      document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load";
+    }).catch(function(){ document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load"; alert("Failed to load image"); });
+  } else { alert("Choose a file or enter a URL"); }
 };
+document.getElementById("loadTextBtn").onclick = function(){
+  var text = document.getElementById("textIn").value.trim();
+  if (!text) { alert("Enter some text"); return; }
+  var fs = parseInt(document.getElementById("fontSize").value, 10) || 72;
+  fs = Math.max(24, Math.min(200, fs));
+  currentFile = null; currentUrl = null; currentText = text; currentFontSize = fs;
+  loadImage(renderTextToCanvas(text, fs), true);
+};
+function setPreviewOrientation(ori){
+  previewOrientation = ori;
+  document.getElementById("oriPortrait").classList.toggle("active", ori === "portrait");
+  document.getElementById("oriLandscape").classList.toggle("active", ori === "landscape");
+  drawPreview();
+}
+document.getElementById("oriPortrait").onclick = function(){ setPreviewOrientation("portrait"); };
+document.getElementById("oriLandscape").onclick = function(){ setPreviewOrientation("landscape"); };
 document.getElementById("rotL").onclick = function(){ setRot(-90); };
 document.getElementById("rotR").onclick = function(){ setRot(90); };
-document.getElementById("rotL2").onclick = function(){ setRot(-90); };
-document.getElementById("rotR2").onclick = function(){ setRot(90); };
-document.getElementById("cropSl").oninput = function(){ setCrop(this.value / 100); document.getElementById("cropSl2").value = this.value; };
-document.getElementById("cropSl2").oninput = function(){ setCrop(this.value / 100); document.getElementById("cropSl").value = this.value; };
+document.getElementById("cropSl").oninput = function(){ setCrop(this.value / 100); };
 document.getElementById("fillBtn").onclick = function(){ setFill(!fillMode); };
-document.getElementById("fillBtn2").onclick = function(){ setFill(!fillMode); };
-document.getElementById("downloadPreviewBtn").onclick = function(){
-  var u = document.getElementById("urlIn").value.trim();
-  if (!u) { alert("Enter a URL first"); return; }
-  this.disabled = true;
-  this.textContent = "Loading...";
-  fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ if (!r.ok) throw new Error(r.status); return r.blob(); }).then(function(blob){
-    var url = URL.createObjectURL(blob);
-    imgEl = new Image();
-    imgEl.onload = function(){ document.getElementById("previewWrap").classList.add("show"); drawPreview(); document.getElementById("downloadPreviewBtn").disabled = false; document.getElementById("downloadPreviewBtn").textContent = "Download preview"; };
-    imgEl.onerror = function(){ document.getElementById("downloadPreviewBtn").disabled = false; document.getElementById("downloadPreviewBtn").textContent = "Download preview"; alert("Failed to load image"); };
-    imgEl.src = url;
-  }).catch(function(){ document.getElementById("downloadPreviewBtn").disabled = false; document.getElementById("downloadPreviewBtn").textContent = "Download preview"; alert("Failed to load image"); });
+document.getElementById("displayBtn").onclick = function(){
+  var btn = this;
+  btn.disabled = true;
+  function done(r){ r.text().then(function(html){ document.open(); document.write(html); document.close(); }).catch(function(){ btn.disabled = false; }); }
+  if (currentFile) {
+    var fd = new FormData();
+    fd.append("photo", currentFile);
+    fd.append("rotation", String(rot));
+    fd.append("crop", String(crop));
+    fd.append("fill", fillMode ? "1" : "0");
+    fetch("/display", { method: "POST", body: fd }).then(done).catch(function(){ btn.disabled = false; });
+  } else if (currentUrl) {
+    var body = "url=" + encodeURIComponent(currentUrl) + "&rotation=" + rot + "&crop=" + crop + "&fill=" + (fillMode ? "1" : "0");
+    fetch("/display_url", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
+  } else if (currentText) {
+    var body = "text=" + encodeURIComponent(currentText) + "&font_size=" + currentFontSize;
+    fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
+  }
 };
 </script>
 </body></html>
@@ -315,6 +507,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(HTML_PAGE.encode("utf-8"))
         elif path == "/preview":
             self._preview_proxy()
+        elif path == "/api/docs":
+            self.send_response(200)
+            self.send_header("Content-type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(API_DOCS_HTML.encode("utf-8"))
         else:
             self.send_error(404)
 
@@ -353,6 +550,9 @@ class Handler(BaseHTTPRequestHandler):
         # Web UI: redirects
         if path == "/display_url":
             self._display_url_redirect()
+            return
+        if path == "/display_text":
+            self._display_text_redirect()
             return
         if path == "/display":
             ct = self.headers.get("Content-type", "")
@@ -416,6 +616,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_redirect("/?display=ok")
         except Exception as e:
             print("Display from URL error:", e)
+            self.send_redirect("/?display=err")
+
+    def _display_text_redirect(self):
+        cl = int(self.headers.get("Content-length", "0") or 0)
+        body = self.rfile.read(cl).decode("utf-8", errors="replace")
+        params = parse_qs(body)
+        text = (params.get("text") or [""])[0] or ""
+        try:
+            font_size = int((params.get("font_size") or ["72"])[0] or "72")
+        except (TypeError, ValueError):
+            font_size = 72
+        font_size = max(12, min(200, font_size))
+        if not text.strip():
+            self.send_redirect("/?display=err")
+            return
+        try:
+            image = render_text_to_image(text.strip(), font_size=font_size)
+            show_image_on_epd(image)
+            self.send_redirect("/?display=ok")
+        except Exception as e:
+            print("Display text error:", e)
             self.send_redirect("/?display=err")
 
     def _send_json(self, status, body):
