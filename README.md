@@ -193,7 +193,7 @@ On **Pi Zero 2 W** (or other non–Pi 5), the same commands work; `EPD_SPI_DEVIC
 
 **If the demo works:** The web app should work too (it uses the same demo lib). If the demo fails, fix hardware/wiring before using the app.
 
-**Full demo walkthrough:** See **[docs/waveshare-official-demo.md](docs/waveshare-official-demo.md)** for detailed steps and troubleshooting.
+**Pi 5, website-only flow:** To follow the [Waveshare wiki](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) and only add what’s needed for Pi 5, see **[docs/waveshare-official-demo.md](docs/waveshare-official-demo.md)** (Pi 5 section at the top + same steps with Pi 5 notes).
 
 ### Checking logs
 
