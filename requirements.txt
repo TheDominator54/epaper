@@ -1,5 +1,0 @@
-# E-paper image server (Raspberry Pi)
-Flask
-Pillow
-spidev
-RPi.GPIO

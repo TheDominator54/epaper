@@ -1,12 +1,4 @@
-# Waveshare lib (cloned by install.sh)
-lib/
-
-# Uploaded images
-uploads/
-
-# Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
-.env
