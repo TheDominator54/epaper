@@ -1,2 +1,0 @@
-# Pip-installed in .venv (setup_venv.sh). PIL/numpy come from system via --system-site-packages.
-spidev>=3.6

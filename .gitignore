@@ -1,4 +1,9 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
+# Build output
+demo/bin/
+demo/epd
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+*~
