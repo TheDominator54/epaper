@@ -7,9 +7,9 @@ Run from repo root. No extra installs; uses same deps as the demo.
   python3 display_photo.py <image_url>  → fetch from URL and display
   python3 display_photo.py --clear       → clear screen (CLI)
 """
-import cgi
 import io
 import os
+import re
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -67,6 +67,29 @@ def clear_epd():
     get_epd().Clear()
 
 
+def parse_multipart_photo(rfile, content_type, content_length):
+    """Parse multipart/form-data and return bytes of the first file named 'photo'. No cgi module."""
+    # Get boundary from Content-Type: multipart/form-data; boundary=----...
+    m = re.search(r'boundary=([^;\s]+)', content_type)
+    if not m:
+        return None
+    boundary = m.group(1).strip().encode("latin-1")
+    if not boundary.startswith(b"--"):
+        boundary = b"--" + boundary
+    body = rfile.read(int(content_length or 0))
+    parts = body.split(boundary)
+    for part in parts:
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        head, _, payload = part.partition(b"\r\n\r\n")
+        if b'name="photo"' not in head and b"name='photo'" not in head:
+            continue
+        # payload may end with \r\n
+        return payload.rstrip(b"\r\n")
+    return None
+
+
 HTML_PAGE = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>e-Paper Photo</title>
 <style>
@@ -120,20 +143,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/display":
             ct = self.headers.get("Content-type", "")
+            cl = self.headers.get("Content-length", "0")
             if not ct.startswith("multipart/form-data"):
                 self.send_redirect("/?display=err")
                 return
             try:
-                form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={
-                    "REQUEST_METHOD": "POST",
-                    "CONTENT_TYPE": self.headers.get("Content-type", ""),
-                    "CONTENT_LENGTH": self.headers.get("Content-length", 0),
-                })
-                part = form.get("photo")
-                if part is None or not getattr(part, "file", None):
+                data = parse_multipart_photo(self.rfile, ct, cl)
+                if not data:
                     self.send_redirect("/?display=err")
                     return
-                data = part.file.read()
                 image = Image.open(io.BytesIO(data))
                 show_image_on_epd(image)
                 self.send_redirect("/?display=ok")
