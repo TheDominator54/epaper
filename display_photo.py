@@ -340,6 +340,7 @@ label{font-size:0.85rem;color:#999;}
 var DISP_W = 1200, DISP_H = 1600, ASPECT = DISP_W / DISP_H;
 var rot = 0, crop = 1, fillMode = false, imgEl = null, currentFile = null, currentUrl = null, currentText = null, currentFontSize = 72;
 var previewOrientation = "landscape";
+function initUI(){
 function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
 function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
 function setFill(v){ fillMode = !!v; document.getElementById("fillBtn").textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
@@ -432,9 +433,12 @@ function drawPreview(){
     ctx.restore();
   }
 }
-document.getElementById("loadBtn").onclick = function(){
-  var f = document.getElementById("fileIn").files[0];
-  var u = document.getElementById("urlIn").value.trim();
+document.getElementById("loadBtn").onclick = function(e){
+  if (e && e.preventDefault) e.preventDefault();
+  var fileInput = document.getElementById("fileIn");
+  var urlInput = document.getElementById("urlIn");
+  var f = fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
+  var u = (urlInput && urlInput.value) ? urlInput.value.trim() : "";
   if (f) {
     currentFile = f; currentUrl = null; currentText = null;
     loadImage(URL.createObjectURL(f), true);
@@ -486,6 +490,9 @@ document.getElementById("displayBtn").onclick = function(){
     fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
   }
 };
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initUI);
+else initUI();
 </script>
 </body></html>
 """
