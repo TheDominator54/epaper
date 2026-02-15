@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+from urllib.parse import parse_qs
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Run from repo root: lib is python/lib
@@ -100,23 +101,36 @@ HTML_PAGE = """<!DOCTYPE html>
 <style>
 body{font-family:system-ui;max-width:420px;margin:2rem auto;padding:1rem;background:#111;color:#ddd;}
 h1{font-size:1.2rem;}
-input[type="file"]{margin:0.5rem 0;}
+input[type="file"],input[type="url"]{margin:0.5rem 0;width:100%;padding:0.5rem;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#ddd;}
+input[type="url"]{font-size:1rem;}
 button{padding:0.6rem 1rem;margin:0.25rem 0.25rem 0.25rem 0;cursor:pointer;border:none;border-radius:6px;font-size:1rem;}
 .btn-display{background:#07c;color:#fff;}
 .btn-clear{background:#444;color:#fff;}
 .msg{margin-top:1rem;padding:0.5rem;border-radius:6px;font-size:0.9rem;}
 .msg.ok{background:#162;}
 .msg.err{background:#622;}
+.section{margin-bottom:1.25rem;}
+label{font-size:0.85rem;color:#999;}
 </style></head><body>
 <h1>e-Paper Photo Display</h1>
-<form method="post" action="/display" enctype="multipart/form-data">
-  <input type="file" name="photo" accept="image/*" required><br>
-  <button type="submit" class="btn-display">Display on e-paper</button>
-</form>
+<div class="section">
+  <label>Upload image</label>
+  <form method="post" action="/display" enctype="multipart/form-data">
+    <input type="file" name="photo" accept="image/*" required><br>
+    <button type="submit" class="btn-display">Display on e-paper</button>
+  </form>
+</div>
+<div class="section">
+  <label>Or paste image URL</label>
+  <form method="post" action="/display_url">
+    <input type="url" name="url" placeholder="https://example.com/photo.jpg" required><br>
+    <button type="submit" class="btn-display">Display from URL</button>
+  </form>
+</div>
 <form method="post" action="/clear" style="display:inline;">
   <button type="submit" class="btn-clear">Clear screen</button>
 </form>
-<p style="color:#666;font-size:0.85rem;">Upload an image and click Display. Refresh takes ~19s.</p>
+<p style="color:#666;font-size:0.85rem;">Refresh takes ~19s.</p>
 <div id="msg" class="msg" style="display:none;"></div>
 <script>
 (function(){
@@ -136,8 +150,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print("[%s] %s" % (self.log_date_time_string(), format % args))
 
+    def _path_only(self):
+        return self.path.split("?")[0]
+
     def do_GET(self):
-        if self.path == "/" or self.path == "/index.html":
+        path = self._path_only()
+        if path == "/" or path == "/index.html":
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
@@ -146,16 +164,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        path = self._path_only()
         # API: JSON responses
-        if self.path == "/api/upload":
+        if path == "/api/upload":
             self._api_upload()
             return
-        if self.path == "/api/clear":
+        if path == "/api/clear":
             self._api_clear()
             return
 
         # Web UI: redirects
-        if self.path == "/display":
+        if path == "/display_url":
+            self._display_url_redirect()
+            return
+        if path == "/display":
             ct = self.headers.get("Content-type", "")
             cl = self.headers.get("Content-length", "0")
             if not ct.startswith("multipart/form-data"):
@@ -174,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_redirect("/?display=err")
             return
 
-        if self.path == "/clear":
+        if path == "/clear":
             try:
                 clear_epd()
                 self.send_redirect("/?clear=ok")
@@ -184,6 +206,24 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self.send_error(404)
+
+    def _display_url_redirect(self):
+        cl = int(self.headers.get("Content-length", "0") or 0)
+        body = self.rfile.read(cl).decode("utf-8", errors="replace")
+        params = parse_qs(body)
+        url = (params.get("url") or [None])[0]
+        if not url or not url.strip():
+            self.send_redirect("/?display=err")
+            return
+        url = url.strip()
+        try:
+            data = fetch_image(url)
+            image = Image.open(io.BytesIO(data))
+            show_image_on_epd(image)
+            self.send_redirect("/?display=ok")
+        except Exception as e:
+            print("Display from URL error:", e)
+            self.send_redirect("/?display=err")
 
     def _send_json(self, status, body):
         raw = json.dumps(body).encode("utf-8")
