@@ -185,7 +185,10 @@ label{font-size:0.85rem;color:#999;}
 <div class="section">
   <label>Or paste image URL</label>
   <form id="formUrl" method="post" action="/display_url">
-    <input type="url" name="url" placeholder="https://example.com/photo.jpg" required><br>
+    <input type="url" name="url" id="urlIn" placeholder="https://example.com/photo.jpg" required><br>
+    <div class="row" style="margin:0.5rem 0;">
+      <button type="button" id="downloadPreviewBtn" class="btn-display">Download preview</button>
+    </div>
     <div class="controls">
       <div class="row"><label>Rotate</label><button type="button" id="rotL2">\u21b6 Left</button><button type="button" id="rotR2">Right \u21b7</button></div>
       <label>Crop in: <span id="cropPct2">100</span>%</label>
@@ -278,6 +281,19 @@ document.getElementById("cropSl").oninput = function(){ setCrop(this.value / 100
 document.getElementById("cropSl2").oninput = function(){ setCrop(this.value / 100); document.getElementById("cropSl").value = this.value; };
 document.getElementById("fillBtn").onclick = function(){ setFill(!fillMode); };
 document.getElementById("fillBtn2").onclick = function(){ setFill(!fillMode); };
+document.getElementById("downloadPreviewBtn").onclick = function(){
+  var u = document.getElementById("urlIn").value.trim();
+  if (!u) { alert("Enter a URL first"); return; }
+  this.disabled = true;
+  this.textContent = "Loading...";
+  fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ if (!r.ok) throw new Error(r.status); return r.blob(); }).then(function(blob){
+    var url = URL.createObjectURL(blob);
+    imgEl = new Image();
+    imgEl.onload = function(){ document.getElementById("previewWrap").classList.add("show"); drawPreview(); document.getElementById("downloadPreviewBtn").disabled = false; document.getElementById("downloadPreviewBtn").textContent = "Download preview"; };
+    imgEl.onerror = function(){ document.getElementById("downloadPreviewBtn").disabled = false; document.getElementById("downloadPreviewBtn").textContent = "Download preview"; alert("Failed to load image"); };
+    imgEl.src = url;
+  }).catch(function(){ document.getElementById("downloadPreviewBtn").disabled = false; document.getElementById("downloadPreviewBtn").textContent = "Download preview"; alert("Failed to load image"); });
+};
 </script>
 </body></html>
 """
@@ -297,8 +313,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(HTML_PAGE.encode("utf-8"))
+        elif path == "/preview":
+            self._preview_proxy()
         else:
             self.send_error(404)
+
+    def _preview_proxy(self):
+        qs = self.path.split("?", 1)[-1] if "?" in self.path else ""
+        params = parse_qs(qs)
+        url = (params.get("url") or [None])[0]
+        if not url or not url.strip():
+            self.send_error(400, "Missing url")
+            return
+        url = url.strip()
+        try:
+            data = fetch_image(url)
+            image = Image.open(io.BytesIO(data))
+            fmt = (image.format or "JPEG").upper()
+            ct = "image/jpeg" if fmt in ("JPEG", "JPG") else "image/png" if fmt == "PNG" else "image/gif" if fmt == "GIF" else "image/webp" if fmt == "WEBP" else "image/jpeg"
+            self.send_response(200)
+            self.send_header("Content-type", ct)
+            self.send_header("Content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            print("Preview proxy error:", e)
+            self.send_error(502, "Failed to fetch image")
 
     def do_POST(self):
         path = self._path_only()
