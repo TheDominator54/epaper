@@ -3,11 +3,16 @@
 Standalone script for Waveshare 13.3" e-Paper HAT+ (E) on Raspberry Pi 5.
 Run from repo root. No extra installs; uses same deps as the demo.
 
-  python3 display_photo.py              → start webserver: upload a photo in browser, it displays on e-paper; Clear screen button too
+  python3 display_photo.py              → start webserver (Web UI + API)
   python3 display_photo.py <image_url>  → fetch from URL and display
   python3 display_photo.py --clear       → clear screen (CLI)
+
+  API (when server is running):
+    POST /api/upload  → body: multipart form field "photo" or raw image (Content-Type: image/...). Returns JSON.
+    POST /api/clear   → clear screen. Returns JSON.
 """
 import io
+import json
 import os
 import re
 import sys
@@ -141,6 +146,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        # API: JSON responses
+        if self.path == "/api/upload":
+            self._api_upload()
+            return
+        if self.path == "/api/clear":
+            self._api_clear()
+            return
+
+        # Web UI: redirects
         if self.path == "/display":
             ct = self.headers.get("Content-type", "")
             cl = self.headers.get("Content-length", "0")
@@ -171,6 +185,41 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_error(404)
 
+    def _send_json(self, status, body):
+        raw = json.dumps(body).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-type", "application/json; charset=utf-8")
+        self.send_header("Content-length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _api_upload(self):
+        ct = self.headers.get("Content-type", "")
+        cl = int(self.headers.get("Content-length", "0") or 0)
+        data = None
+        if ct.startswith("multipart/form-data"):
+            data = parse_multipart_photo(self.rfile, ct, str(cl))
+        elif ct.startswith("image/"):
+            data = self.rfile.read(cl) if cl else b""
+        if not data:
+            self._send_json(400, {"ok": False, "error": "Send image as multipart form field 'photo' or raw body with Content-Type: image/..."})
+            return
+        try:
+            image = Image.open(io.BytesIO(data))
+            show_image_on_epd(image)
+            self._send_json(200, {"ok": True, "message": "Display updating (~19s)"})
+        except Exception as e:
+            print("Display error:", e)
+            self._send_json(500, {"ok": False, "error": str(e)})
+
+    def _api_clear(self):
+        try:
+            clear_epd()
+            self._send_json(200, {"ok": True, "message": "Screen cleared"})
+        except Exception as e:
+            print("Clear error:", e)
+            self._send_json(500, {"ok": False, "error": str(e)})
+
     def send_redirect(self, location):
         self.send_response(302)
         self.send_header("Location", location)
@@ -180,8 +229,10 @@ class Handler(BaseHTTPRequestHandler):
 def run_server():
     port = 5000
     server = HTTPServer(("0.0.0.0", port), Handler)
-    print("e-Paper photo server: http://localhost:%s (upload a photo to display, Clear screen to clear)" % port)
-    print("From another device: http://<pi-ip>:%s" % port)
+    print("e-Paper photo server: http://localhost:%s" % port)
+    print("  Web UI: upload photo, Clear screen button")
+    print("  API: POST /api/upload (multipart 'photo' or raw image), POST /api/clear")
+    print("  From another device: http://<pi-ip>:%s" % port)
     server.serve_forever()
 
 
