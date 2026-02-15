@@ -154,35 +154,24 @@ Use this anytime to check that packages, SPI, the Waveshare lib, and the systemd
 
 Before using the web app, test the display with the **official Waveshare demo** to confirm hardware, wiring, and SPI. The web app uses the demo’s lib (`EPD_DEMO_LIB`) so if the demo works, the app should too.
 
-**Download and install the demo:**
+**Demo in this repo (Pi 5 ready)**  
+The repo includes the 13.3" E demo under `13.3inch_e-Paper_E/` with a **Pi 5–compatible** `lib/epdconfig.py` (no `.so` files; uses rpi-lgpio and dual SPI). On the Pi:
 
 ```bash
-cd ~
-wget "https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip" -O 13.3inch_e-Paper_E.zip
-unzip 13.3inch_e-Paper_E.zip -d 13.3inch_e-Paper_E
-sudo apt-get update
-sudo apt-get install -y python3-pil python3-numpy python3-spidev
+# One-time: enable SPI (raspi-config → SPI → Yes), then on Pi 5:
+sudo apt install -y python3-rpi-lgpio && sudo apt remove -y python3-rpi.gpio
+sudo apt install -y python3-pil python3-numpy python3-spidev
+
+# Run the demo (from repo root on the Pi, e.g. ~/epaper)
+./run_demo.sh
+# Or manually:
+# cd 13.3inch_e-Paper_E/RaspberryPi/python/examples && python3 epd_13in3E_test.py
 ```
 
-**Use the repo’s Python-only epdconfig** (so you don’t need compiled `.so` files):
+You need `pic/Font.ttc` and `pic/13in3E.bmp` in `13.3inch_e-Paper_E/RaspberryPi/python/pic/` (copy from the [Waveshare zip](https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip) if missing). See `13.3inch_e-Paper_E/RaspberryPi/python/README_Pi5.md` for full steps. If the display stays blank, try `export EPD_SPI_DEVICE=1` before running.
 
-```bash
-cp ~/epaper/config/epdconfig_13in3e.py ~/13.3inch_e-Paper_E/RaspberryPi/python/lib/epdconfig.py
-```
-
-**Run the demo:**
-
-On **Pi 5** you must use this repo’s epdconfig (it uses dual SPI so the kernel can keep GPIO 7/8). From the Pi:
-
-```bash
-cd ~/epaper && git pull
-cp ~/epaper/config/epdconfig_13in3e.py ~/13.3inch_e-Paper_E/RaspberryPi/python/lib/epdconfig.py
-cd ~/13.3inch_e-Paper_E/RaspberryPi/python/examples
-export EPD_SPI_DEVICE=1
-python3 epd_13in3E_test.py
-```
-
-On **Pi Zero 2 W** (or other non–Pi 5), the same commands work; `EPD_SPI_DEVICE=1` is optional if SPI 0,0 is free.
+**Alternative: demo outside the repo**  
+Download the zip from Waveshare, unzip, then copy this repo’s epdconfig into the demo’s `lib/` and run from there (see [docs/waveshare-official-demo.md](docs/waveshare-official-demo.md)).
 
 **What to expect:**
 
