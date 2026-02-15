@@ -24,21 +24,26 @@ echo "[2/8] Enabling SPI..."
 sudo raspi-config nonint do_spi 0
 echo "SPI enabled."
 
-echo "[3/8] config.txt: adding gpio=7=op,dl and gpio=8=op,dl for 13.3\" HAT+ (E)..."
-for CONFIG in /boot/firmware/config.txt /boot/config.txt; do
-  if [ -f "$CONFIG" ]; then
-    if grep -q "gpio=7=op,dl" "$CONFIG" 2>/dev/null; then
-      echo "  $CONFIG already has gpio lines, skipping."
-    else
-      echo "" | sudo tee -a "$CONFIG" >/dev/null
-      echo "# 13.3inch e-Paper HAT+ (E) - Waveshare wiki" | sudo tee -a "$CONFIG" >/dev/null
-      echo "gpio=7=op,dl" | sudo tee -a "$CONFIG" >/dev/null
-      echo "gpio=8=op,dl" | sudo tee -a "$CONFIG" >/dev/null
-      echo "  Appended to $CONFIG"
+echo "[3/8] config.txt: GPIO 7/8 for 13.3\" HAT+ (E)..."
+# On Pi 5, lgpio must allocate GPIO 7 and 8 (CS_S, CS_M); reserving them in config.txt causes "GPIO not allocated". Skip adding them on Pi 5.
+if grep -q "Raspberry Pi 5" /proc/device-tree/model 2>/dev/null; then
+  echo "  Pi 5: not adding gpio=7/8 so Python (rpi-lgpio) can control CS pins."
+else
+  for CONFIG in /boot/firmware/config.txt /boot/config.txt; do
+    if [ -f "$CONFIG" ]; then
+      if grep -q "gpio=7=op,dl" "$CONFIG" 2>/dev/null; then
+        echo "  $CONFIG already has gpio lines, skipping."
+      else
+        echo "" | sudo tee -a "$CONFIG" >/dev/null
+        echo "# 13.3inch e-Paper HAT+ (E) - Waveshare wiki" | sudo tee -a "$CONFIG" >/dev/null
+        echo "gpio=7=op,dl" | sudo tee -a "$CONFIG" >/dev/null
+        echo "gpio=8=op,dl" | sudo tee -a "$CONFIG" >/dev/null
+        echo "  Appended to $CONFIG"
+      fi
+      break
     fi
-    break
-  fi
-done
+  done
+fi
 
 echo "[4/8] Cloning Waveshare e-Paper library (for epdconfig and waveshare_epd)..."
 if [ ! -d "lib/e-Paper" ]; then
