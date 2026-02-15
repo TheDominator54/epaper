@@ -1,9 +1,0 @@
-# Build output
-demo/bin/
-demo/epd
-
-# OS / editor
-.DS_Store
-*.swp
-*.swo
-*~
