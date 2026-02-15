@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # Verify everything is ready for the 13.3" E-Paper demo. Run from repo root.
+# If .venv exists, checks that environment; otherwise checks system Python.
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEMO="${SCRIPT_DIR}/13.3inch_e-Paper_E/RaspberryPi/python"
 MISSING=""
+
+# Prefer venv Python when present (same as run_demo.sh)
+if [ -d "${SCRIPT_DIR}/.venv" ] && [ -x "${SCRIPT_DIR}/.venv/bin/python" ]; then
+  PYTHON="${SCRIPT_DIR}/.venv/bin/python"
+  echo "[using .venv]"
+else
+  PYTHON=python3
+fi
 
 # Demo files
 for f in "${DEMO}/examples/epd_13in3E_test.py" "${DEMO}/lib/epd13in3E.py" "${DEMO}/lib/epdconfig.py" "${DEMO}/pic/Font.ttc" "${DEMO}/pic/13in3E.bmp"; do
@@ -16,7 +25,7 @@ done
 # BMP must be 1200×1600 or 1600×1200 for getbuffer()
 BMP="${DEMO}/pic/13in3E.bmp"
 if [ -f "$BMP" ]; then
-  BMP_SIZE=$(python3 -c "
+  BMP_SIZE=$("$PYTHON" -c "
 import sys
 try:
     with open(sys.argv[1], 'rb') as f:
@@ -40,23 +49,27 @@ if [ ! -c /dev/spidev0.0 ] || [ ! -c /dev/spidev0.1 ]; then
   MISSING="${MISSING}\n  - SPI not enabled (no /dev/spidev0.0 or /dev/spidev0.1). Run: sudo raspi-config → Interface Options → SPI → Yes, then reboot"
 else
   echo "[OK] SPI (/dev/spidev0.0, /dev/spidev0.1)"
-  if ! python3 -c "import spidev; s=spidev.SpiDev(); s.open(0,0); s.close()" 2>/dev/null; then
+  if ! "$PYTHON" -c "import spidev; s=spidev.SpiDev(); s.open(0,0); s.close()" 2>/dev/null; then
     echo "  (Warning: cannot open SPI as this user — run with sudo: sudo ./run_demo.sh — or: sudo usermod -aG spi \$USER then re-login)"
   fi
 fi
 
-# Python deps
-if ! python3 -c "import RPi.GPIO" 2>/dev/null; then
-  MISSING="${MISSING}\n  - Python: RPi.GPIO (on Pi 5 install: sudo apt install python3-rpi-lgpio && sudo apt remove python3-rpi.gpio)"
+# Python deps (in venv or system)
+if ! "$PYTHON" -c "import RPi.GPIO" 2>/dev/null; then
+  MISSING="${MISSING}\n  - Python: RPi.GPIO (sudo apt install python3-rpi-lgpio && sudo apt remove python3-rpi.gpio; then run ./setup_venv.sh)"
 else
   echo "[OK] Python RPi.GPIO"
 fi
-if ! python3 -c "import spidev" 2>/dev/null; then
-  MISSING="${MISSING}\n  - Python: spidev (sudo apt install python3-spidev)"
+if ! "$PYTHON" -c "import spidev" 2>/dev/null; then
+  if [ -d "${SCRIPT_DIR}/.venv" ]; then
+    MISSING="${MISSING}\n  - Python: spidev in venv (run: ./setup_venv.sh)"
+  else
+    MISSING="${MISSING}\n  - Python: spidev (sudo apt install python3-spidev, or run ./setup_venv.sh for venv + pip spidev)"
+  fi
 else
   echo "[OK] Python spidev"
 fi
-if ! python3 -c "import PIL" 2>/dev/null; then
+if ! "$PYTHON" -c "import PIL" 2>/dev/null; then
   MISSING="${MISSING}\n  - Python: PIL (sudo apt install python3-pil)"
 else
   echo "[OK] Python PIL"
@@ -64,8 +77,8 @@ fi
 
 # Driver import (verifies epdconfig + RPi.GPIO + spidev + PIL chain)
 DEMO_LIB="${DEMO}/lib"
-if ! python3 -c "import sys; sys.path.insert(0, '${DEMO_LIB}'); import epd13in3E" 2>/dev/null; then
-  MISSING="${MISSING}\n  - Driver import failed (check above deps and that you're in repo root)"
+if ! "$PYTHON" -c "import sys; sys.path.insert(0, '${DEMO_LIB}'); import epd13in3E" 2>/dev/null; then
+  MISSING="${MISSING}\n  - Driver import failed (check above deps; if using venv, run ./setup_venv.sh)"
 else
   echo "[OK] epd13in3E driver imports"
 fi

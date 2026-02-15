@@ -2,16 +2,38 @@
 
 Minimal repo to run the [Waveshare 13.3" E Ink HAT+ (E)](https://www.waveshare.com/wiki/13.3inch_e-Paper_HAT+_(E)_Manual#Raspberry_Pi) demo on a **Raspberry Pi 5**. Follow the official wiki for hardware; this adds the Pi 5–specific steps.
 
-## Next steps (do this on the Pi)
+## Robust plan (using venv) — recommended
 
-1. **Hardware** — HAT plugged onto the 40-pin header (pin 1 to pin 1). Use the official 5 V 5 A USB‑C PSU.
-2. **Repo** — Clone or sync: `gh repo clone TheDominator54/epaper` (or `cd epaper && git pull`). Then `cd epaper` and `chmod +x run_demo.sh check_demo.sh`.
-3. **One-time setup** — Enable SPI: `sudo raspi-config` → Interface Options → SPI → **Yes** → Finish → `sudo reboot`. After reboot: `sudo apt update && sudo apt install -y python3-rpi-lgpio python3-pil python3-numpy python3-spidev && sudo apt remove -y python3-rpi.gpio`.
-4. **Do not** add `gpio=7=op,dl` or `gpio=8=op,dl` to `/boot/firmware/config.txt` on Pi 5.
-5. **Check** — From repo root: `./check_demo.sh`. Fix any missing item it reports. If it says you can’t open SPI, use `sudo ./run_demo.sh` or run `sudo usermod -aG spi $USER` and log out and back in.
-6. **Run** — `./run_demo.sh` (or `sudo ./run_demo.sh` if you got the SPI permission warning). The display should clear, show graphics, show the BMP, clear again, then sleep.
+This uses a virtual environment so **spidev** comes from pip (avoids Bookworm/system spidev issues) while **RPi.GPIO** (rpi-lgpio) and **PIL/numpy** stay from apt. Do the following **on the Pi**, in order.
+
+1. **Hardware** — HAT on 40-pin header (pin 1 to pin 1). Use the official 5 V 5 A USB‑C PSU.
+2. **Repo** — `cd ~ && gh repo clone TheDominator54/epaper` (or `cd ~/epaper && git pull`). Then:
+   ```bash
+   cd ~/epaper
+   chmod +x run_demo.sh check_demo.sh setup_venv.sh
+   ```
+3. **Enable SPI** — `sudo raspi-config` → Interface Options → SPI → **Yes** → Finish → **Reboot**.
+4. **After reboot: system packages** (no venv yet):
+   ```bash
+   sudo apt update
+   sudo apt install -y python3-venv python3-rpi-lgpio python3-pil python3-numpy
+   sudo apt remove -y python3-rpi.gpio
+   ```
+   Do **not** add `gpio=7=op,dl` or `gpio=8=op,dl` to `/boot/firmware/config.txt` on Pi 5.
+5. **Create venv and install spidev** (in repo root):
+   ```bash
+   cd ~/epaper
+   ./setup_venv.sh
+   ```
+   This creates `.venv` with `--system-site-packages` and installs **spidev** via pip.
+6. **Check** — `./check_demo.sh`. It will use `.venv` if present. Fix any missing item. If it warns about SPI permissions, use `sudo ./run_demo.sh` or `sudo usermod -aG spi $USER` and re-login.
+7. **Run** — `./run_demo.sh` (or `sudo ./run_demo.sh` if needed). The script uses `.venv/bin/python` automatically when `.venv` exists.
 
 If the display stays blank or you get SPI errors, see **Run the demo** and **If it still doesn’t work** below.
+
+## Next steps (without venv)
+
+If you prefer not to use a venv: follow **Install the repo** and **On the Pi (one-time setup)** below, then run `./check_demo.sh` and `./run_demo.sh`. On Bookworm, if you see spidev/SPI issues, use the **venv** flow above.
 
 ## Install the repo (gh)
 
@@ -22,10 +44,10 @@ sudo apt install -y gh
 gh auth login
 gh repo clone TheDominator54/epaper
 cd epaper
-chmod +x run_demo.sh check_demo.sh
+chmod +x run_demo.sh check_demo.sh setup_venv.sh
 ```
 
-Then do the one-time setup below and run the demo.
+For a **robust, venv-based setup** (recommended on Pi 5 / Bookworm), follow **Robust plan (using venv)** above. Otherwise do the one-time setup below and run the demo.
 
 ## Hardware
 
@@ -70,8 +92,8 @@ From the repo root on the Pi:
 
 ```bash
 cd ~/epaper
-./check_demo.sh   # optional: verify SPI, deps, and files
-./run_demo.sh
+./check_demo.sh   # optional: verify SPI, deps, and files (uses .venv if present)
+./run_demo.sh     # uses .venv/bin/python when .venv exists
 ```
 
 **If you see "Permission denied"** opening `/dev/spidev0.0`: run `sudo ./run_demo.sh`, or add your user to the `spi` group and re-login: `sudo usermod -aG spi $USER`.
