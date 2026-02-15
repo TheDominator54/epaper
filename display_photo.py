@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
 Standalone script for Waveshare 13.3" e-Paper HAT+ (E) on Raspberry Pi 5.
-Fetch a photo from a URL and display it, or clear the screen.
 Run from repo root. No extra installs; uses same deps as the demo.
 
-  python3 display_photo.py <image_url>   → fetch and display photo
-  python3 display_photo.py --clear       → clear screen
+  python3 display_photo.py              → start webserver: upload a photo in browser, it displays on e-paper; Clear screen button too
+  python3 display_photo.py <image_url>  → fetch from URL and display
+  python3 display_photo.py --clear       → clear screen (CLI)
 """
+import cgi
 import io
 import os
 import sys
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Run from repo root: lib is python/lib
 _this_dir = os.path.dirname(os.path.realpath(__file__))
@@ -23,9 +25,19 @@ from PIL import Image
 EPD_WIDTH = 1200
 EPD_HEIGHT = 1600
 
+# One EPD instance, init on first use
+_epd = None
+
+
+def get_epd():
+    global _epd
+    if _epd is None:
+        _epd = epd13in3E.EPD()
+        _epd.Init()
+    return _epd
+
 
 def fetch_image(url):
-    """Fetch image bytes from URL. Uses stdlib only."""
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "e-Paper/1.0"})
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -33,7 +45,6 @@ def fetch_image(url):
 
 
 def format_for_display(image):
-    """Resize and letterbox to EPD_WIDTH x EPD_HEIGHT. Returns RGB Image."""
     if image.mode != "RGB":
         image = image.convert("RGB")
     w, h = image.size
@@ -46,33 +57,139 @@ def format_for_display(image):
     return canvas
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage:  python3 display_photo.py <image_url>  |  python3 display_photo.py --clear")
-        sys.exit(1)
+def show_image_on_epd(image):
+    epd = get_epd()
+    formatted = format_for_display(image)
+    epd.display(epd.getbuffer(formatted))
 
-    if sys.argv[1] == "--clear":
-        epd = epd13in3E.EPD()
-        epd.Init()
-        print("Clearing screen...")
-        epd.Clear()
-        epd.sleep()
+
+def clear_epd():
+    get_epd().Clear()
+
+
+HTML_PAGE = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>e-Paper Photo</title>
+<style>
+body{font-family:system-ui;max-width:420px;margin:2rem auto;padding:1rem;background:#111;color:#ddd;}
+h1{font-size:1.2rem;}
+input[type="file"]{margin:0.5rem 0;}
+button{padding:0.6rem 1rem;margin:0.25rem 0.25rem 0.25rem 0;cursor:pointer;border:none;border-radius:6px;font-size:1rem;}
+.btn-display{background:#07c;color:#fff;}
+.btn-clear{background:#444;color:#fff;}
+.msg{margin-top:1rem;padding:0.5rem;border-radius:6px;font-size:0.9rem;}
+.msg.ok{background:#162;}
+.msg.err{background:#622;}
+</style></head><body>
+<h1>e-Paper Photo Display</h1>
+<form method="post" action="/display" enctype="multipart/form-data">
+  <input type="file" name="photo" accept="image/*" required><br>
+  <button type="submit" class="btn-display">Display on e-paper</button>
+</form>
+<form method="post" action="/clear" style="display:inline;">
+  <button type="submit" class="btn-clear">Clear screen</button>
+</form>
+<p style="color:#666;font-size:0.85rem;">Upload an image and click Display. Refresh takes ~19s.</p>
+<div id="msg" class="msg" style="display:none;"></div>
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+  var m = document.getElementById("msg");
+  if (q.get("display") === "ok") { m.className = "msg ok"; m.style.display = "block"; m.textContent = "Display updating (~19s)."; }
+  if (q.get("display") === "err") { m.className = "msg err"; m.style.display = "block"; m.textContent = "Display failed."; }
+  if (q.get("clear") === "ok") { m.className = "msg ok"; m.style.display = "block"; m.textContent = "Screen cleared."; }
+  if (q.get("clear") === "err") { m.className = "msg err"; m.style.display = "block"; m.textContent = "Clear failed."; }
+})();
+</script>
+</body></html>
+"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        print("[%s] %s" % (self.log_date_time_string(), format % args))
+
+    def do_GET(self):
+        if self.path == "/" or self.path == "/index.html":
+            self.send_response(200)
+            self.send_header("Content-type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(HTML_PAGE.encode("utf-8"))
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        if self.path == "/display":
+            ct = self.headers.get("Content-type", "")
+            if not ct.startswith("multipart/form-data"):
+                self.send_redirect("/?display=err")
+                return
+            try:
+                form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={
+                    "REQUEST_METHOD": "POST",
+                    "CONTENT_TYPE": self.headers.get("Content-type", ""),
+                    "CONTENT_LENGTH": self.headers.get("Content-length", 0),
+                })
+                part = form.get("photo")
+                if part is None or not getattr(part, "file", None):
+                    self.send_redirect("/?display=err")
+                    return
+                data = part.file.read()
+                image = Image.open(io.BytesIO(data))
+                show_image_on_epd(image)
+                self.send_redirect("/?display=ok")
+            except Exception as e:
+                print("Display error:", e)
+                self.send_redirect("/?display=err")
+            return
+
+        if self.path == "/clear":
+            try:
+                clear_epd()
+                self.send_redirect("/?clear=ok")
+            except Exception as e:
+                print("Clear error:", e)
+                self.send_redirect("/?clear=err")
+            return
+
+        self.send_error(404)
+
+    def send_redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.end_headers()
+
+
+def run_server():
+    port = 5000
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    print("e-Paper photo server: http://localhost:%s (upload a photo to display, Clear screen to clear)" % port)
+    print("From another device: http://<pi-ip>:%s" % port)
+    server.serve_forever()
+
+
+def main():
+    if len(sys.argv) >= 2:
+        if sys.argv[1] == "--clear":
+            epd = epd13in3E.EPD()
+            epd.Init()
+            print("Clearing screen...")
+            epd.Clear()
+            epd.sleep()
+            print("Done.")
+            return
+        # URL: fetch and display
+        url = sys.argv[1]
+        print("Fetching image...")
+        data = fetch_image(url)
+        image = Image.open(io.BytesIO(data))
+        print("Displaying (refresh ~19s)...")
+        show_image_on_epd(image)
+        get_epd().sleep()
         print("Done.")
         return
 
-    url = sys.argv[1]
-    print("Fetching image...")
-    data = fetch_image(url)
-    image = Image.open(io.BytesIO(data))
-    print("Formatting for display...")
-    formatted = format_for_display(image)
-
-    epd = epd13in3E.EPD()
-    epd.Init()
-    print("Displaying (refresh ~19s)...")
-    epd.display(epd.getbuffer(formatted))
-    epd.sleep()
-    print("Done.")
+    # No args: run webserver
+    run_server()
 
 
 if __name__ == "__main__":
