@@ -172,11 +172,17 @@ cp ~/epaper/config/epdconfig_13in3e.py ~/13.3inch_e-Paper_E/RaspberryPi/python/l
 
 **Run the demo:**
 
+On **Pi 5** you must use this repo’s epdconfig (it uses dual SPI so the kernel can keep GPIO 7/8). From the Pi:
+
 ```bash
+cd ~/epaper && git pull
+cp ~/epaper/config/epdconfig_13in3e.py ~/13.3inch_e-Paper_E/RaspberryPi/python/lib/epdconfig.py
 cd ~/13.3inch_e-Paper_E/RaspberryPi/python/examples
 export EPD_SPI_DEVICE=1
 python3 epd_13in3E_test.py
 ```
+
+On **Pi Zero 2 W** (or other non–Pi 5), the same commands work; `EPD_SPI_DEVICE=1` is optional if SPI 0,0 is free.
 
 **What to expect:**
 
@@ -303,7 +309,7 @@ If the app or `./scripts/run_epd_demo.sh` reports success and you see “Display
 
 2. **SPI and config**
    - **SPI enabled:** `ls /dev/spi*` should show at least `/dev/spidev0.0` (and often `spidev0.1`). If not, run `sudo raspi-config` → Interface Options → SPI → Enable, then reboot.
-   - **config.txt (non–Pi 5):** On Pi Zero 2 W and similar, `gpio=7=op,dl` and `gpio=8=op,dl` are added by install.sh. **On Pi 5**, install.sh does *not* add these so that rpi-lgpio can control the CS pins; if you see `lgpio.error: 'GPIO not allocated'`, remove or comment out any `gpio=7=op,dl` and `gpio=8=op,dl` lines from `/boot/firmware/config.txt` (or `/boot/config.txt`), then reboot.
+   - **config.txt (non–Pi 5):** On Pi Zero 2 W and similar, install.sh adds `gpio=7=op,dl` and `gpio=8=op,dl`. **On Pi 5**, the kernel reserves GPIO 7/8 for SPI; our epdconfig uses dual SpiDev (spidev0.0 + spidev0.1) and does not touch those pins, so no config.txt change is needed.
 
 3. **SPI device and speed (Python epdconfig)**
    - If the display is still blank, try the **other** SPI device (Waveshare FAQ: “modify position to 0,1” when SPI is occupied):
@@ -328,7 +334,7 @@ If the app or `./scripts/run_epd_demo.sh` reports success and you see “Display
    - On Raspberry Pi 5, the classic RPi.GPIO library is not supported. Use the drop-in replacement: `sudo apt install python3-rpi-lgpio` and `sudo apt remove python3-rpi.gpio`, then run the demo or app again. `install.sh` does this automatically when it detects a Pi 5.
 
 7. **Pi 5: `lgpio.error: 'GPIO not allocated'` on CS pins (7/8)**
-   - The kernel has reserved GPIO 7 and 8 via config.txt (`gpio=7=op,dl`, `gpio=8=op,dl`), so rpi-lgpio cannot use them. Edit `/boot/firmware/config.txt` (or `/boot/config.txt`), remove or comment out those two lines, then reboot. On Pi 5, install.sh does not add them so the Python driver can control the CS pins.
+   - With SPI enabled (`dtparam=spi=on`), the **kernel** reserves GPIO 7 and 8 for `/dev/spidev0.0` and `/dev/spidev0.1`, so userspace cannot allocate them. The repo’s **epdconfig** detects Pi 5 and uses **dual SPI** (both spidev0.0 and spidev0.1): it does not call `GPIO.setup` on 7/8 and switches which SPI device it writes to when the driver selects CS_M or CS_S. Ensure you are using `config/epdconfig_13in3e.py` (copied to the demo’s `lib/epdconfig.py` or installed via `install.sh`). You do not need to remove any config.txt lines; the kernel keeps owning 7/8 for SPI.
 
 8. **Run the official demo**
    - Download the [Waveshare 13.3" E demo](https://files.waveshare.com/wiki/13.3inch%20e-Paper%20HAT%2B/13.3inch_e-Paper_E.zip), unzip, then from `13.3inch_e-Paper_E/RaspberryPi/python/examples/` run `python3 epd_13in3E_test.py` (with their lib on `PYTHONPATH`). If the **official** demo also shows nothing, the issue is hardware or wiring; if it works, the issue is our epdconfig or driver usage.
