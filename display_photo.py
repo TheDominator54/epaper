@@ -287,8 +287,17 @@ label{font-size:0.85rem;color:#999;}
 .orientation-row{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;}
 .orientation-row .btn-ori{padding:0.4rem 0.75rem;font-size:0.9rem;background:#333;color:#ddd;border:1px solid #555;border-radius:6px;cursor:pointer;}
 .orientation-row .btn-ori.active{background:#07c;border-color:#07c;color:#fff;}
+.orientation-section{margin-bottom:1rem;}
 </style></head><body>
 <h1>e-Paper Photo Display</h1>
+<div class="section orientation-section">
+  <label>Preview orientation</label>
+  <div class="orientation-row">
+    <button type="button" id="oriPortrait" class="btn-ori">Portrait</button>
+    <button type="button" id="oriLandscape" class="btn-ori active">Landscape</button>
+  </div>
+  <p class="preview-caption" style="margin-top:0.25rem;">Match how your display is mounted. Portrait = tall; Landscape = wide.</p>
+</div>
 <div class="section">
   <label>Image source</label>
   <div class="source-row">
@@ -309,11 +318,6 @@ label{font-size:0.85rem;color:#999;}
 </div>
 <div class="preview-wrap" id="previewWrap">
   <p class="preview-caption">Preview (display 1200\u00d71600)</p>
-  <div class="orientation-row">
-    <label>Orientation:</label>
-    <button type="button" id="oriPortrait" class="btn-ori">Portrait</button>
-    <button type="button" id="oriLandscape" class="btn-ori active">Landscape</button>
-  </div>
   <canvas id="preview" width="400" height="300"></canvas>
   <div class="controls">
     <div class="row"><label>Rotate</label><button type="button" id="rotL">\u21b6 Left</button><button type="button" id="rotR">Right \u21b7</button></div>
@@ -329,6 +333,7 @@ label{font-size:0.85rem;color:#999;}
 <p style="color:#666;font-size:0.85rem;">Refresh takes ~19s. <a href="/api/docs" style="color:#6af;">API docs</a></p>
 <div id="msg" class="msg" style="display:none;"></div>
 <script>
+console.log("[epaper] Script loaded");
 (function(){
   var q = new URLSearchParams(location.search);
   var m = document.getElementById("msg");
@@ -341,17 +346,24 @@ var DISP_W = 1200, DISP_H = 1600, ASPECT = DISP_W / DISP_H;
 var rot = 0, crop = 1, fillMode = false, imgEl = null, currentFile = null, currentUrl = null, currentText = null, currentFontSize = 72;
 var previewOrientation = "landscape";
 function initUI(){
+  console.log("[epaper] initUI called");
+  var loadBtn = document.getElementById("loadBtn");
+  var fileIn = document.getElementById("fileIn");
+  var urlIn = document.getElementById("urlIn");
+  console.log("[epaper] loadBtn=" + (loadBtn ? "found" : "NULL"), "fileIn=" + (fileIn ? "found" : "NULL"), "urlIn=" + (urlIn ? "found" : "NULL"));
 function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
 function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
 function setFill(v){ fillMode = !!v; document.getElementById("fillBtn").textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
 function syncRotCrop(){ document.getElementById("cropPct").textContent = Math.round(crop * 100); }
-function showPreview(){ document.getElementById("previewWrap").classList.add("show"); document.getElementById("displayBtn").disabled = false; }
+function showPreview(){ console.log("[epaper] showPreview"); document.getElementById("previewWrap").classList.add("show"); document.getElementById("displayBtn").disabled = false; }
 function loadImage(src, isBlobUrl){
+  console.log("[epaper] loadImage called, isBlobUrl=" + isBlobUrl, typeof src);
   if (imgEl && isBlobUrl && imgEl.src && imgEl.src.indexOf("blob:") === 0) URL.revokeObjectURL(imgEl.src);
   imgEl = new Image();
-  imgEl.onload = function(){ rot = 0; crop = 1; fillMode = false; setFill(false); document.getElementById("cropSl").value = 100; syncRotCrop(); drawPreview(); showPreview(); };
-  imgEl.onerror = function(){ alert("Failed to load image"); };
+  imgEl.onload = function(){ console.log("[epaper] image onload, size=" + imgEl.naturalWidth + "x" + imgEl.naturalHeight); rot = 0; crop = 1; fillMode = false; setFill(false); document.getElementById("cropSl").value = 100; syncRotCrop(); drawPreview(); showPreview(); };
+  imgEl.onerror = function(){ console.log("[epaper] image onerror"); alert("Failed to load image"); };
   imgEl.src = src;
+  console.log("[epaper] imgEl.src set");
 }
 function renderTextToCanvas(text, fontSize){
   var c = document.createElement("canvas");
@@ -433,24 +445,29 @@ function drawPreview(){
     ctx.restore();
   }
 }
-document.getElementById("loadBtn").onclick = function(e){
-  if (e && e.preventDefault) e.preventDefault();
-  var fileInput = document.getElementById("fileIn");
-  var urlInput = document.getElementById("urlIn");
-  var f = fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
-  var u = (urlInput && urlInput.value) ? urlInput.value.trim() : "";
-  if (f) {
-    currentFile = f; currentUrl = null; currentText = null;
-    loadImage(URL.createObjectURL(f), true);
-  } else if (u) {
-    currentFile = null; currentUrl = u; currentText = null;
-    this.disabled = true; this.textContent = "Loading...";
-    fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ if (!r.ok) throw new Error(); return r.blob(); }).then(function(blob){
-      loadImage(URL.createObjectURL(blob), true);
-      document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load";
-    }).catch(function(){ document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load"; alert("Failed to load image"); });
-  } else { alert("Choose a file or enter a URL"); }
-};
+  loadBtn.onclick = function(e){
+    console.log("[epaper] Load clicked");
+    if (e && e.preventDefault) e.preventDefault();
+    var fileInput = document.getElementById("fileIn");
+    var urlInput = document.getElementById("urlIn");
+    var f = fileInput && fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
+    var u = (urlInput && urlInput.value) ? String(urlInput.value).trim() : "";
+    console.log("[epaper] file selected=" + (f ? f.name + " " + f.size + " bytes" : "none"), "url=" + (u ? u.substring(0,50) + "..." : "empty"));
+    if (f) {
+      console.log("[epaper] Loading from file");
+      currentFile = f; currentUrl = null; currentText = null;
+      loadImage(URL.createObjectURL(f), true);
+    } else if (u) {
+      console.log("[epaper] Loading from URL");
+      currentFile = null; currentUrl = u; currentText = null;
+      this.disabled = true; this.textContent = "Loading...";
+      fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ console.log("[epaper] fetch status=" + r.status); if (!r.ok) throw new Error(r.status); return r.blob(); }).then(function(blob){ console.log("[epaper] blob size=" + blob.size); loadImage(URL.createObjectURL(blob), true); document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load"; }).catch(function(err){ console.log("[epaper] fetch error", err); document.getElementById("loadBtn").disabled = false; document.getElementById("loadBtn").textContent = "Load"; alert("Failed to load image"); });
+    } else {
+      console.log("[epaper] No file or URL");
+      alert("Choose a file or enter a URL");
+    }
+  };
+  console.log("[epaper] loadBtn.onclick assigned");
 document.getElementById("loadTextBtn").onclick = function(){
   var text = document.getElementById("textIn").value.trim();
   if (!text) { alert("Enter some text"); return; }
@@ -491,8 +508,13 @@ document.getElementById("displayBtn").onclick = function(){
   }
 };
 }
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initUI);
-else initUI();
+if (document.readyState === "loading") {
+  console.log("[epaper] Waiting for DOMContentLoaded");
+  document.addEventListener("DOMContentLoaded", function(){ console.log("[epaper] DOMContentLoaded"); try { initUI(); } catch (err) { console.error("[epaper] initUI error", err); } });
+} else {
+  console.log("[epaper] DOM already ready, calling initUI");
+  try { initUI(); } catch (err) { console.error("[epaper] initUI error", err); }
+}
 </script>
 </body></html>
 """
