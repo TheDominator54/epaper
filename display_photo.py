@@ -50,13 +50,24 @@ def fetch_image(url):
         return r.read()
 
 
-def apply_transform(image, rotation=0, crop=1.0):
-    """Apply rotation (degrees CW: 0, 90, 180, 270) and center crop (1.0 = no crop, 0.5 = zoom to 50%)."""
+DISPLAY_ASPECT = EPD_WIDTH / EPD_HEIGHT  # 1200/1600 = 0.75 (portrait)
+
+
+def apply_transform(image, rotation=0, crop=1.0, fill=False):
+    """Apply rotation (degrees CW), then center crop (1.0 = no crop) or fill (crop to 3:4 to fill display)."""
     if rotation and rotation % 360 != 0:
-        # PIL rotate: angle in degrees CCW. So 90 CW = -90 CCW.
         image = image.rotate(-rotation, expand=True, resample=Image.Resampling.BICUBIC)
-    if crop < 1.0 and crop > 0:
-        w, h = image.size
+    w, h = image.size
+    if fill:
+        # Crop to display aspect (3:4) from center so image fills the screen
+        if w / h > DISPLAY_ASPECT:
+            ch, cw = h, max(1, int(h * DISPLAY_ASPECT))
+        else:
+            cw, ch = w, max(1, int(w / DISPLAY_ASPECT))
+        left = (w - cw) // 2
+        top = (h - ch) // 2
+        image = image.crop((left, top, left + cw, top + ch))
+    elif crop < 1.0 and crop > 0:
         cw = max(1, int(w * crop))
         ch = max(1, int(h * crop))
         left = (w - cw) // 2
@@ -114,7 +125,15 @@ def parse_multipart_form(rfile, content_type, content_length):
         if name == "photo" and (b"filename=" in head or len(payload) > 0):
             photo = payload
         else:
-            fields[name] = payload.decode("utf-8", errors="replace").strip()
+            # Text field: payload can contain trailing \\r\\n and next boundary (e.g. 270\\r\\n--)
+            val = payload.decode("utf-8", errors="replace").strip()
+            if "\r\n" in val:
+                val = val.split("\r\n")[0].strip()
+            if "\n" in val:
+                val = val.split("\n")[0].strip()
+            # Drop any trailing boundary fragment (e.g. "--" or "--boundary")
+            val = val.split("--")[0].strip()
+            fields[name] = val
     return photo, fields
 
 
@@ -137,9 +156,10 @@ label{font-size:0.85rem;color:#999;}
 .controls{background:#222;padding:0.75rem;border-radius:8px;margin:0.75rem 0;}
 .controls label{display:block;margin-bottom:0.25rem;}
 .controls .row{display:flex;align-items:center;gap:0.5rem;margin:0.35rem 0;}
-#preview{max-width:100%;max-height:200px;display:block;margin:0.5rem 0;border-radius:6px;background:#222;}
+#preview{max-width:100%;display:block;margin:0.5rem 0;border-radius:6px;background:#222;}
 .preview-wrap{display:none;}
 .preview-wrap.show{display:block;}
+.preview-caption{font-size:0.75rem;color:#666;margin-bottom:0.25rem;}
 </style></head><body>
 <h1>e-Paper Photo Display</h1>
 <div class="section">
@@ -147,13 +167,16 @@ label{font-size:0.85rem;color:#999;}
   <form id="formFile" method="post" action="/display" enctype="multipart/form-data">
     <input type="file" name="photo" id="fileIn" accept="image/*" required><br>
     <div class="preview-wrap" id="previewWrap">
-      <canvas id="preview" width="400" height="200"></canvas>
+      <p class="preview-caption">Preview (display 1200\u00d71600, rotated 90\u00b0 CCW)</p>
+      <canvas id="preview" width="400" height="300"></canvas>
       <div class="controls">
         <div class="row"><label>Rotate</label><button type="button" id="rotL">\u21b6 Left</button><button type="button" id="rotR">Right \u21b7</button></div>
         <label>Crop in: <span id="cropPct">100</span>%</label>
         <input type="range" id="cropSl" min="25" max="100" value="100" step="5">
+        <div class="row"><button type="button" id="fillBtn" class="btn-display">Crop to fill screen</button></div>
         <input type="hidden" name="rotation" id="rotVal" value="0">
         <input type="hidden" name="crop" id="cropVal" value="1">
+        <input type="hidden" name="fill" id="fillVal" value="0">
       </div>
     </div>
     <button type="submit" class="btn-display">Display on e-paper</button>
@@ -167,8 +190,10 @@ label{font-size:0.85rem;color:#999;}
       <div class="row"><label>Rotate</label><button type="button" id="rotL2">\u21b6 Left</button><button type="button" id="rotR2">Right \u21b7</button></div>
       <label>Crop in: <span id="cropPct2">100</span>%</label>
       <input type="range" id="cropSl2" min="25" max="100" value="100" step="5">
+      <div class="row"><button type="button" id="fillBtn2" class="btn-display">Crop to fill screen</button></div>
       <input type="hidden" name="rotation" id="rotVal2" value="0">
       <input type="hidden" name="crop" id="cropVal2" value="1">
+      <input type="hidden" name="fill" id="fillVal2" value="0">
     </div>
     <button type="submit" class="btn-display">Display from URL</button>
   </form>
@@ -187,9 +212,11 @@ label{font-size:0.85rem;color:#999;}
   if (q.get("clear") === "ok") { m.className = "msg ok"; m.style.display = "block"; m.textContent = "Screen cleared."; }
   if (q.get("clear") === "err") { m.className = "msg err"; m.style.display = "block"; m.textContent = "Clear failed."; }
 })();
-var rot = 0, crop = 1, imgEl = null;
+var DISP_W = 1200, DISP_H = 1600, ASPECT = DISP_W / DISP_H;
+var rot = 0, crop = 1, fillMode = false, imgEl = null;
 function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
 function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
+function setFill(v){ fillMode = !!v; document.getElementById("fillVal").value = document.getElementById("fillVal2").value = fillMode ? "1" : "0"; document.getElementById("fillBtn").textContent = document.getElementById("fillBtn2").textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
 function syncRotCrop(){
   document.getElementById("rotVal").value = document.getElementById("rotVal2").value = rot;
   document.getElementById("cropVal").value = document.getElementById("cropVal2").value = crop;
@@ -197,21 +224,42 @@ function syncRotCrop(){
 }
 function drawPreview(){
   if (!imgEl || !imgEl.complete) return;
-  var c = document.getElementById("preview");
-  var ctx = c.getContext("2d");
   var w = imgEl.naturalWidth, h = imgEl.naturalHeight;
-  var cw = Math.max(1, Math.floor(w * crop)), ch = Math.max(1, Math.floor(h * crop));
-  var sx = (w - cw) / 2, sy = (h - ch) / 2;
-  var scale = Math.min(c.width / cw, c.height / ch);
+  var rw = (rot % 180 === 0) ? w : h, rh = (rot % 180 === 0) ? h : w;
+  var cw, ch, sx, sy;
+  if (fillMode) {
+    if (rw / rh > ASPECT) { ch = rh; cw = Math.max(1, rh * ASPECT); } else { cw = rw; ch = Math.max(1, rw / ASPECT); }
+    sx = (rw - cw) / 2; sy = (rh - ch) / 2;
+  } else {
+    cw = Math.max(1, Math.floor(rw * crop)); ch = Math.max(1, Math.floor(rh * crop));
+    sx = (rw - cw) / 2; sy = (rh - ch) / 2;
+  }
+  var temp = document.createElement("canvas");
+  temp.width = rw; temp.height = rh;
+  var tctx = temp.getContext("2d");
+  tctx.translate(rw/2, rh/2);
+  tctx.rotate(-rot * Math.PI / 180);
+  tctx.translate(-w/2, -h/2);
+  tctx.drawImage(imgEl, 0, 0, w, h);
+  var scale = Math.min(DISP_W / cw, DISP_H / ch);
   var dw = cw * scale, dh = ch * scale;
-  var dx = (c.width - dw) / 2, dy = (c.height - dh) / 2;
+  var dx = (DISP_W - dw) / 2, dy = (DISP_H - dh) / 2;
+  var off = document.createElement("canvas");
+  off.width = DISP_W; off.height = DISP_H;
+  var octx = off.getContext("2d");
+  octx.fillStyle = "#fff";
+  octx.fillRect(0, 0, DISP_W, DISP_H);
+  octx.drawImage(temp, sx, sy, cw, ch, dx, dy, dw, dh);
+  var c = document.getElementById("preview");
+  c.width = 400; c.height = 300;
+  var ctx = c.getContext("2d");
   ctx.fillStyle = "#222";
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.save();
-  ctx.translate(c.width/2, c.height/2);
-  ctx.rotate(-rot * Math.PI / 180);
-  ctx.translate(-c.width/2, -c.height/2);
-  ctx.drawImage(imgEl, sx, sy, cw, ch, dx, dy, dw, dh);
+  ctx.translate(200, 150);
+  ctx.rotate(-90 * Math.PI / 180);
+  ctx.scale(0.25, 0.25);
+  ctx.drawImage(off, 0, 0, DISP_W, DISP_H, -DISP_W/2, -DISP_H/2, DISP_W, DISP_H);
   ctx.restore();
 }
 document.getElementById("fileIn").onchange = function(){
@@ -219,7 +267,7 @@ document.getElementById("fileIn").onchange = function(){
   if (!f) { document.getElementById("previewWrap").classList.remove("show"); return; }
   document.getElementById("previewWrap").classList.add("show");
   imgEl = new Image();
-  imgEl.onload = function(){ rot = 0; crop = 1; document.getElementById("cropSl").value = 100; syncRotCrop(); drawPreview(); };
+  imgEl.onload = function(){ rot = 0; crop = 1; fillMode = false; setFill(false); document.getElementById("cropSl").value = document.getElementById("cropSl2").value = 100; syncRotCrop(); drawPreview(); };
   imgEl.src = URL.createObjectURL(f);
 };
 document.getElementById("rotL").onclick = function(){ setRot(-90); };
@@ -228,6 +276,8 @@ document.getElementById("rotL2").onclick = function(){ setRot(-90); };
 document.getElementById("rotR2").onclick = function(){ setRot(90); };
 document.getElementById("cropSl").oninput = function(){ setCrop(this.value / 100); document.getElementById("cropSl2").value = this.value; };
 document.getElementById("cropSl2").oninput = function(){ setCrop(this.value / 100); document.getElementById("cropSl").value = this.value; };
+document.getElementById("fillBtn").onclick = function(){ setFill(!fillMode); };
+document.getElementById("fillBtn2").onclick = function(){ setFill(!fillMode); };
 </script>
 </body></html>
 """
@@ -276,13 +326,14 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_redirect("/?display=err")
                     return
                 rotation = int(form.get("rotation") or 0) % 360
+                fill = form.get("fill", "").lower() in ("1", "on", "true", "yes")
                 try:
                     crop = float(form.get("crop") or "1")
                 except (TypeError, ValueError):
                     crop = 1.0
                 crop = max(0.25, min(1.0, crop))
                 image = Image.open(io.BytesIO(data))
-                image = apply_transform(image, rotation=rotation, crop=crop)
+                image = apply_transform(image, rotation=rotation, crop=crop, fill=fill)
                 show_image_on_epd(image)
                 self.send_redirect("/?display=ok")
             except Exception as e:
@@ -311,6 +362,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         url = url.strip()
         rotation = int((params.get("rotation") or ["0"])[0] or 0) % 360
+        fill = ((params.get("fill") or [""])[0] or "").lower() in ("1", "on", "true", "yes")
         try:
             crop = float((params.get("crop") or ["1"])[0] or "1")
         except (TypeError, ValueError):
@@ -319,7 +371,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             data = fetch_image(url)
             image = Image.open(io.BytesIO(data))
-            image = apply_transform(image, rotation=rotation, crop=crop)
+            image = apply_transform(image, rotation=rotation, crop=crop, fill=fill)
             show_image_on_epd(image)
             self.send_redirect("/?display=ok")
         except Exception as e:
@@ -347,6 +399,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "Send image as multipart form field 'photo' or raw body with Content-Type: image/..."})
             return
         rotation = int(form.get("rotation") or 0) % 360
+        fill = form.get("fill", "").lower() in ("1", "on", "true", "yes")
         try:
             crop = float(form.get("crop") or "1")
         except (TypeError, ValueError):
@@ -354,7 +407,7 @@ class Handler(BaseHTTPRequestHandler):
         crop = max(0.25, min(1.0, crop))
         try:
             image = Image.open(io.BytesIO(data))
-            image = apply_transform(image, rotation=rotation, crop=crop)
+            image = apply_transform(image, rotation=rotation, crop=crop, fill=fill)
             show_image_on_epd(image)
             self._send_json(200, {"ok": True, "message": "Display updating (~19s)"})
         except Exception as e:
