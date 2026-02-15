@@ -50,6 +50,21 @@ def fetch_image(url):
         return r.read()
 
 
+def apply_transform(image, rotation=0, crop=1.0):
+    """Apply rotation (degrees CW: 0, 90, 180, 270) and center crop (1.0 = no crop, 0.5 = zoom to 50%)."""
+    if rotation and rotation % 360 != 0:
+        # PIL rotate: angle in degrees CCW. So 90 CW = -90 CCW.
+        image = image.rotate(-rotation, expand=True, resample=Image.Resampling.BICUBIC)
+    if crop < 1.0 and crop > 0:
+        w, h = image.size
+        cw = max(1, int(w * crop))
+        ch = max(1, int(h * crop))
+        left = (w - cw) // 2
+        top = (h - ch) // 2
+        image = image.crop((left, top, left + cw, top + ch))
+    return image
+
+
 def format_for_display(image):
     if image.mode != "RGB":
         image = image.convert("RGB")
@@ -73,27 +88,34 @@ def clear_epd():
     get_epd().Clear()
 
 
-def parse_multipart_photo(rfile, content_type, content_length):
-    """Parse multipart/form-data and return bytes of the first file named 'photo'. No cgi module."""
-    # Get boundary from Content-Type: multipart/form-data; boundary=----...
+def parse_multipart_form(rfile, content_type, content_length):
+    """Parse multipart/form-data. Returns (photo_bytes or None, fields_dict)."""
     m = re.search(r'boundary=([^;\s]+)', content_type)
     if not m:
-        return None
+        return None, {}
     boundary = m.group(1).strip().encode("latin-1")
     if not boundary.startswith(b"--"):
         boundary = b"--" + boundary
     body = rfile.read(int(content_length or 0))
     parts = body.split(boundary)
+    photo = None
+    fields = {}
     for part in parts:
         part = part.strip(b"\r\n")
         if not part or part == b"--":
             continue
         head, _, payload = part.partition(b"\r\n\r\n")
-        if b'name="photo"' not in head and b"name='photo'" not in head:
+        payload = payload.rstrip(b"\r\n")
+        # Get name from Content-Disposition: form-data; name="..."
+        name_m = re.search(rb'name=["\']([^"\']+)["\']', head)
+        if not name_m:
             continue
-        # payload may end with \r\n
-        return payload.rstrip(b"\r\n")
-    return None
+        name = name_m.group(1).decode("latin-1")
+        if name == "photo" and (b"filename=" in head or len(payload) > 0):
+            photo = payload
+        else:
+            fields[name] = payload.decode("utf-8", errors="replace").strip()
+    return photo, fields
 
 
 HTML_PAGE = """<!DOCTYPE html>
@@ -103,6 +125,7 @@ body{font-family:system-ui;max-width:420px;margin:2rem auto;padding:1rem;backgro
 h1{font-size:1.2rem;}
 input[type="file"],input[type="url"]{margin:0.5rem 0;width:100%;padding:0.5rem;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#ddd;}
 input[type="url"]{font-size:1rem;}
+input[type="range"]{width:100%;margin:0.25rem 0;}
 button{padding:0.6rem 1rem;margin:0.25rem 0.25rem 0.25rem 0;cursor:pointer;border:none;border-radius:6px;font-size:1rem;}
 .btn-display{background:#07c;color:#fff;}
 .btn-clear{background:#444;color:#fff;}
@@ -111,19 +134,42 @@ button{padding:0.6rem 1rem;margin:0.25rem 0.25rem 0.25rem 0;cursor:pointer;borde
 .msg.err{background:#622;}
 .section{margin-bottom:1.25rem;}
 label{font-size:0.85rem;color:#999;}
+.controls{background:#222;padding:0.75rem;border-radius:8px;margin:0.75rem 0;}
+.controls label{display:block;margin-bottom:0.25rem;}
+.controls .row{display:flex;align-items:center;gap:0.5rem;margin:0.35rem 0;}
+#preview{max-width:100%;max-height:200px;display:block;margin:0.5rem 0;border-radius:6px;background:#222;}
+.preview-wrap{display:none;}
+.preview-wrap.show{display:block;}
 </style></head><body>
 <h1>e-Paper Photo Display</h1>
 <div class="section">
   <label>Upload image</label>
-  <form method="post" action="/display" enctype="multipart/form-data">
-    <input type="file" name="photo" accept="image/*" required><br>
+  <form id="formFile" method="post" action="/display" enctype="multipart/form-data">
+    <input type="file" name="photo" id="fileIn" accept="image/*" required><br>
+    <div class="preview-wrap" id="previewWrap">
+      <canvas id="preview" width="400" height="200"></canvas>
+      <div class="controls">
+        <div class="row"><label>Rotate</label><button type="button" id="rotL">\u21b6 Left</button><button type="button" id="rotR">Right \u21b7</button></div>
+        <label>Crop in: <span id="cropPct">100</span>%</label>
+        <input type="range" id="cropSl" min="25" max="100" value="100" step="5">
+        <input type="hidden" name="rotation" id="rotVal" value="0">
+        <input type="hidden" name="crop" id="cropVal" value="1">
+      </div>
+    </div>
     <button type="submit" class="btn-display">Display on e-paper</button>
   </form>
 </div>
 <div class="section">
   <label>Or paste image URL</label>
-  <form method="post" action="/display_url">
+  <form id="formUrl" method="post" action="/display_url">
     <input type="url" name="url" placeholder="https://example.com/photo.jpg" required><br>
+    <div class="controls">
+      <div class="row"><label>Rotate</label><button type="button" id="rotL2">\u21b6 Left</button><button type="button" id="rotR2">Right \u21b7</button></div>
+      <label>Crop in: <span id="cropPct2">100</span>%</label>
+      <input type="range" id="cropSl2" min="25" max="100" value="100" step="5">
+      <input type="hidden" name="rotation" id="rotVal2" value="0">
+      <input type="hidden" name="crop" id="cropVal2" value="1">
+    </div>
     <button type="submit" class="btn-display">Display from URL</button>
   </form>
 </div>
@@ -141,6 +187,47 @@ label{font-size:0.85rem;color:#999;}
   if (q.get("clear") === "ok") { m.className = "msg ok"; m.style.display = "block"; m.textContent = "Screen cleared."; }
   if (q.get("clear") === "err") { m.className = "msg err"; m.style.display = "block"; m.textContent = "Clear failed."; }
 })();
+var rot = 0, crop = 1, imgEl = null;
+function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
+function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
+function syncRotCrop(){
+  document.getElementById("rotVal").value = document.getElementById("rotVal2").value = rot;
+  document.getElementById("cropVal").value = document.getElementById("cropVal2").value = crop;
+  document.getElementById("cropPct").textContent = document.getElementById("cropPct2").textContent = Math.round(crop * 100);
+}
+function drawPreview(){
+  if (!imgEl || !imgEl.complete) return;
+  var c = document.getElementById("preview");
+  var ctx = c.getContext("2d");
+  var w = imgEl.naturalWidth, h = imgEl.naturalHeight;
+  var cw = Math.max(1, Math.floor(w * crop)), ch = Math.max(1, Math.floor(h * crop));
+  var sx = (w - cw) / 2, sy = (h - ch) / 2;
+  var scale = Math.min(c.width / cw, c.height / ch);
+  var dw = cw * scale, dh = ch * scale;
+  var dx = (c.width - dw) / 2, dy = (c.height - dh) / 2;
+  ctx.fillStyle = "#222";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.save();
+  ctx.translate(c.width/2, c.height/2);
+  ctx.rotate(-rot * Math.PI / 180);
+  ctx.translate(-c.width/2, -c.height/2);
+  ctx.drawImage(imgEl, sx, sy, cw, ch, dx, dy, dw, dh);
+  ctx.restore();
+}
+document.getElementById("fileIn").onchange = function(){
+  var f = this.files[0];
+  if (!f) { document.getElementById("previewWrap").classList.remove("show"); return; }
+  document.getElementById("previewWrap").classList.add("show");
+  imgEl = new Image();
+  imgEl.onload = function(){ rot = 0; crop = 1; document.getElementById("cropSl").value = 100; syncRotCrop(); drawPreview(); };
+  imgEl.src = URL.createObjectURL(f);
+};
+document.getElementById("rotL").onclick = function(){ setRot(-90); };
+document.getElementById("rotR").onclick = function(){ setRot(90); };
+document.getElementById("rotL2").onclick = function(){ setRot(-90); };
+document.getElementById("rotR2").onclick = function(){ setRot(90); };
+document.getElementById("cropSl").oninput = function(){ setCrop(this.value / 100); document.getElementById("cropSl2").value = this.value; };
+document.getElementById("cropSl2").oninput = function(){ setCrop(this.value / 100); document.getElementById("cropSl").value = this.value; };
 </script>
 </body></html>
 """
@@ -184,11 +271,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_redirect("/?display=err")
                 return
             try:
-                data = parse_multipart_photo(self.rfile, ct, cl)
+                data, form = parse_multipart_form(self.rfile, ct, cl)
                 if not data:
                     self.send_redirect("/?display=err")
                     return
+                rotation = int(form.get("rotation") or 0) % 360
+                try:
+                    crop = float(form.get("crop") or "1")
+                except (TypeError, ValueError):
+                    crop = 1.0
+                crop = max(0.25, min(1.0, crop))
                 image = Image.open(io.BytesIO(data))
+                image = apply_transform(image, rotation=rotation, crop=crop)
                 show_image_on_epd(image)
                 self.send_redirect("/?display=ok")
             except Exception as e:
@@ -216,9 +310,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_redirect("/?display=err")
             return
         url = url.strip()
+        rotation = int((params.get("rotation") or ["0"])[0] or 0) % 360
+        try:
+            crop = float((params.get("crop") or ["1"])[0] or "1")
+        except (TypeError, ValueError):
+            crop = 1.0
+        crop = max(0.25, min(1.0, crop))
         try:
             data = fetch_image(url)
             image = Image.open(io.BytesIO(data))
+            image = apply_transform(image, rotation=rotation, crop=crop)
             show_image_on_epd(image)
             self.send_redirect("/?display=ok")
         except Exception as e:
@@ -237,15 +338,23 @@ class Handler(BaseHTTPRequestHandler):
         ct = self.headers.get("Content-type", "")
         cl = int(self.headers.get("Content-length", "0") or 0)
         data = None
+        form = {}
         if ct.startswith("multipart/form-data"):
-            data = parse_multipart_photo(self.rfile, ct, str(cl))
+            data, form = parse_multipart_form(self.rfile, ct, str(cl))
         elif ct.startswith("image/"):
             data = self.rfile.read(cl) if cl else b""
         if not data:
             self._send_json(400, {"ok": False, "error": "Send image as multipart form field 'photo' or raw body with Content-Type: image/..."})
             return
+        rotation = int(form.get("rotation") or 0) % 360
+        try:
+            crop = float(form.get("crop") or "1")
+        except (TypeError, ValueError):
+            crop = 1.0
+        crop = max(0.25, min(1.0, crop))
         try:
             image = Image.open(io.BytesIO(data))
+            image = apply_transform(image, rotation=rotation, crop=crop)
             show_image_on_epd(image)
             self._send_json(200, {"ok": True, "message": "Display updating (~19s)"})
         except Exception as e:
