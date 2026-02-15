@@ -75,12 +75,15 @@ class EPD():
         epdconfig.digital_write(self.EPD_CS_S_PIN, Value)
 
     def SendCommand(self, Command):
+        epdconfig.digital_write(self.EPD_DC_PIN, 0)  # DC low = command (required; .so did this in original demo)
         epdconfig.spi_writebyte(Command)
 
     def SendData(self, Data):
+        epdconfig.digital_write(self.EPD_DC_PIN, 1)  # DC high = data
         epdconfig.spi_writebyte(Data)
-    
+
     def SendData2(self, buf, Len):
+        epdconfig.digital_write(self.EPD_DC_PIN, 1)  # DC high = data
         epdconfig.spi_writebyte2(buf, Len)
 
     def ReadBusyH(self):
@@ -237,7 +240,7 @@ class EPD():
         elif(imwidth == self.height and imheight == self.width):
             image_temp = image.rotate(90, expand=True)
         else:
-            print("Invalid image dimensions: %d x %d, expected %d x %d" % (imwidth, imheight, self.width, self.height))
+            raise ValueError("Invalid image dimensions: %d x %d, expected %d x %d or %d x %d" % (imwidth, imheight, self.width, self.height, self.height, self.width))
 
         # Convert the soruce image to the 7 colors, dithering if needed
         image_7color = image_temp.convert("RGB").quantize(palette=pal_image)

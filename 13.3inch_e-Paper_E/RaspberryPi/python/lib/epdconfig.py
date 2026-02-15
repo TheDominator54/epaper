@@ -24,10 +24,12 @@ EPD_PWR_PIN = 18
 # EPD_SPI_SPEED_HZ: default 1000000 to reduce peak current (avoid brownout). 4000000 if power is solid.
 # EPD_PWR_DELAY_SEC: seconds to wait after PWR on before SPI init (spreads inrush). Default 2.
 _spi = None
-# Pi 5: kernel owns GPIO 7/8; we use two SPI devices and switch on CS_M/CS_S selection.
+# Pi 5: kernel owns GPIO 7/8; we use two SPI devices. Track which half(es) are selected.
 _spi_m = None
 _spi_s = None
 _use_pi5_dual_spi = False
+_main_selected = False
+_secondary_selected = False
 
 
 def _is_pi5() -> bool:
@@ -48,13 +50,13 @@ def _digital_read(pin: int) -> int:
 
 
 def digital_write(pin: int, value: int) -> None:
-    global _spi
-    # Driver uses active-low CS: 0 = select, 1 = deselect. Switch SPI device when selecting (value=0).
-    if _use_pi5_dual_spi and value == 0:
-        if pin == EPD_CS_M_PIN:
-            _spi = _spi_m
-        elif pin == EPD_CS_S_PIN:
-            _spi = _spi_s
+    global _main_selected, _secondary_selected
+    # Driver uses active-low CS: 0 = select, 1 = deselect.
+    # CS_ALL(0) selects BOTH halves; we must send same data to both spidev devices.
+    if _use_pi5_dual_spi and pin == EPD_CS_M_PIN:
+        _main_selected = value == 0
+    elif _use_pi5_dual_spi and pin == EPD_CS_S_PIN:
+        _secondary_selected = value == 0
     if not _use_pi5_dual_spi or pin not in (EPD_CS_M_PIN, EPD_CS_S_PIN):
         _digital_write(pin, value)
 
@@ -64,7 +66,14 @@ def digital_read(pin: int) -> int:
 
 
 def spi_writebyte(value: int) -> None:
-    _spi.writebytes([value & 0xFF])
+    data = [value & 0xFF]
+    if _use_pi5_dual_spi:
+        if _main_selected and _spi_m is not None:
+            _spi_m.writebytes(data)
+        if _secondary_selected and _spi_s is not None:
+            _spi_s.writebytes(data)
+    else:
+        _spi.writebytes(data)
 
 
 def spi_writebyte2(buf, length: int) -> None:
@@ -72,7 +81,13 @@ def spi_writebyte2(buf, length: int) -> None:
         data = list(buf)[:length]
     else:
         data = list(buf)[:length]
-    _spi.writebytes(data)
+    if _use_pi5_dual_spi:
+        if _main_selected and _spi_m is not None:
+            _spi_m.writebytes(data)
+        if _secondary_selected and _spi_s is not None:
+            _spi_s.writebytes(data)
+    else:
+        _spi.writebytes(data)
 
 
 def delay_ms(ms: float) -> None:
@@ -101,7 +116,10 @@ def module_init() -> None:
     device = int(os.environ.get("EPD_SPI_DEVICE", "0"))
     speed_hz = int(os.environ.get("EPD_SPI_SPEED_HZ", "1000000"))
     if _use_pi5_dual_spi:
-        # Kernel owns CE0/CE1 (GPIO 8/7); use both SPI devices and switch on CS_M/CS_S selection.
+        # Kernel owns CE0/CE1 (GPIO 8/7). Use two SpiDev handles; when driver selects both CS (CS_ALL(0)), send to both.
+        global _main_selected, _secondary_selected
+        _main_selected = False
+        _secondary_selected = False
         _spi_m = spidev.SpiDev()
         _spi_m.open(bus, 0)
         _spi_m.max_speed_hz = speed_hz
@@ -110,7 +128,7 @@ def module_init() -> None:
         _spi_s.open(bus, 1)
         _spi_s.max_speed_hz = speed_hz
         _spi_s.mode = 0
-        _spi = _spi_m
+        _spi = _spi_m  # fallback for non-dual path
     else:
         _spi = spidev.SpiDev()
         _spi.open(bus, device)
