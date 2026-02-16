@@ -41,7 +41,7 @@ EPD_WIDTH = 1200
 EPD_HEIGHT = 1600
 DISPLAY_ASPECT = EPD_WIDTH / EPD_HEIGHT
 
-MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+MAX_UPLOAD_BYTES = 16 * 1024 * 1024
 MAX_FORM_BYTES = 256 * 1024
 MAX_FETCH_BYTES = 12 * 1024 * 1024
 MAX_IMAGE_PIXELS = 30_000_000
@@ -391,10 +391,13 @@ def _rebuild_preview_locked():
         crop=_preview_state.crop,
         fill=_preview_state.fill,
     )
+    if _preview_state.orientation == "landscape":
+        transformed = transformed.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
+
     display_image = format_for_display(transformed)
 
     if _preview_state.orientation == "landscape":
-        ui_image = display_image.rotate(90, expand=True)
+        ui_image = display_image.rotate(-90, expand=True)
     else:
         ui_image = display_image
 
@@ -685,6 +688,8 @@ HTML_PAGE = """<!DOCTYPE html>
       hasPreview: false,
       busy: false,
     };
+    const CLIENT_UPLOAD_TARGET_BYTES = 10 * 1024 * 1024;
+    const CLIENT_UPLOAD_MAX_EDGE = 2600;
 
     const el = {
       status: document.getElementById("status"),
@@ -710,6 +715,77 @@ HTML_PAGE = """<!DOCTYPE html>
     function setStatus(message, kind = "") {
       el.status.textContent = message;
       el.status.className = "status" + (kind ? " " + kind : "");
+    }
+
+    function formatBytes(bytes) {
+      const mb = bytes / (1024 * 1024);
+      return `${mb.toFixed(1)} MB`;
+    }
+
+    function canvasToBlob(canvas, type, quality) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (!blob) reject(new Error("Failed to encode image"));
+          else resolve(blob);
+        }, type, quality);
+      });
+    }
+
+    async function decodeImageFile(file) {
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const img = new Image();
+        img.decoding = "async";
+        img.src = objectUrl;
+        await img.decode();
+        return { img, objectUrl };
+      } catch (err) {
+        URL.revokeObjectURL(objectUrl);
+        throw err;
+      }
+    }
+
+    async function prepareFileForUpload(file) {
+      if (file.size <= CLIENT_UPLOAD_TARGET_BYTES) {
+        return { file, resized: false };
+      }
+
+      const { img, objectUrl } = await decodeImageFile(file);
+      try {
+        let scale = Math.min(1, CLIENT_UPLOAD_MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+        let bestBlob = null;
+
+        for (let pass = 0; pass < 4; pass += 1) {
+          const width = Math.max(1, Math.round(img.naturalWidth * scale));
+          const height = Math.max(1, Math.round(img.naturalHeight * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const qualities = [0.92, 0.86, 0.8, 0.74, 0.68, 0.6];
+          for (const q of qualities) {
+            const blob = await canvasToBlob(canvas, "image/jpeg", q);
+            bestBlob = blob;
+            if (blob.size <= CLIENT_UPLOAD_TARGET_BYTES) {
+              const stem = (file.name || "upload").replace(/\\.[^.]+$/, "");
+              const outFile = new File([blob], `${stem}.jpg`, { type: "image/jpeg" });
+              return { file: outFile, resized: true, originalBytes: file.size, finalBytes: blob.size };
+            }
+          }
+
+          if (scale <= 0.35) break;
+          scale *= 0.85;
+        }
+
+        if (!bestBlob) throw new Error("Failed to resize image");
+        const stem = (file.name || "upload").replace(/\\.[^.]+$/, "");
+        const fallbackFile = new File([bestBlob], `${stem}.jpg`, { type: "image/jpeg" });
+        return { file: fallbackFile, resized: true, originalBytes: file.size, finalBytes: bestBlob.size };
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
     }
 
     async function requestJSON(url, options = {}, cfg = {}) {
@@ -784,16 +860,27 @@ HTML_PAGE = """<!DOCTYPE html>
         return;
       }
 
-      const form = new FormData();
-      form.append("photo", file);
-      form.append("orientation", state.orientation);
-
       setBusy(true);
-      setStatus("Uploading file and generating preview...");
+      setStatus("Preparing file and generating preview...");
       try {
+        const prepared = await prepareFileForUpload(file);
+        if (prepared.file.size > (16 * 1024 * 1024)) {
+          throw new Error("Image is still too large after resize. Try a smaller source.");
+        }
+        const form = new FormData();
+        form.append("photo", prepared.file, prepared.file.name);
+        form.append("orientation", state.orientation);
+
         const payload = await requestJSON("/api/preview/source", { method: "POST", body: form });
         applyResponse(payload);
-        setStatus("Preview loaded from file.", "ok");
+        if (prepared.resized) {
+          setStatus(
+            `Preview loaded from resized file (${formatBytes(prepared.originalBytes)} -> ${formatBytes(prepared.finalBytes)}).`,
+            "ok"
+          );
+        } else {
+          setStatus("Preview loaded from file.", "ok");
+        }
       } catch (err) {
         setStatus(err.message || "Failed to load file preview.", "err");
       } finally {
