@@ -48,8 +48,6 @@ MAX_IMAGE_PIXELS = 30_000_000
 FETCH_TIMEOUT_SECONDS = 30
 ALLOWED_ROTATIONS = {0, 90, 180, 270}
 ALLOWED_ORIENTATIONS = {"portrait", "landscape"}
-PREVIEW_MAX_WIDTH = 1000
-PREVIEW_MAX_HEIGHT = 1000
 
 ALLOW_PRIVATE_URLS = os.environ.get("EPAPER_ALLOW_PRIVATE_URLS", "").lower() in (
     "1",
@@ -370,17 +368,9 @@ def parse_multipart_form(rfile, content_type, content_length):
 
 
 def _encode_preview_png(image):
-    to_show = image
-    if to_show.width > PREVIEW_MAX_WIDTH or to_show.height > PREVIEW_MAX_HEIGHT:
-        scale = min(PREVIEW_MAX_WIDTH / to_show.width, PREVIEW_MAX_HEIGHT / to_show.height)
-        to_show = to_show.resize(
-            (max(1, int(to_show.width * scale)), max(1, int(to_show.height * scale))),
-            Image.Resampling.LANCZOS,
-        )
-
     buf = io.BytesIO()
-    to_show.save(buf, format="PNG")
-    return buf.getvalue(), to_show.width, to_show.height
+    image.save(buf, format="PNG")
+    return buf.getvalue(), image.width, image.height
 
 
 def _rebuild_preview_locked():
@@ -401,7 +391,7 @@ def _rebuild_preview_locked():
     display_image = format_for_display(transformed)
 
     if _preview_state.orientation == "landscape":
-        ui_image = display_image.rotate(-90, expand=True)
+        ui_image = display_image.rotate(90, expand=True)
     else:
         ui_image = display_image
 
