@@ -222,17 +222,18 @@ def load_image_from_bytes(data):
     return image
 
 
-def apply_transform(image, rotation=0, crop=1.0, fill=False):
+def apply_transform(image, rotation=0, crop=1.0, fill=False, target_aspect=DISPLAY_ASPECT):
     """Apply rotation (degrees CW), then center crop or fill crop to display ratio."""
     if rotation and rotation % 360 != 0:
         image = image.rotate(-rotation, expand=True, resample=Image.Resampling.BICUBIC)
 
     w, h = image.size
     if fill:
-        if w / h > DISPLAY_ASPECT:
-            ch, cw = h, max(1, int(h * DISPLAY_ASPECT))
+        aspect = target_aspect if target_aspect and target_aspect > 0 else DISPLAY_ASPECT
+        if w / h > aspect:
+            ch, cw = h, max(1, int(h * aspect))
         else:
-            cw, ch = w, max(1, int(w / DISPLAY_ASPECT))
+            cw, ch = w, max(1, int(w / aspect))
         left = (w - cw) // 2
         top = (h - ch) // 2
         image = image.crop((left, top, left + cw, top + ch))
@@ -385,11 +386,14 @@ def _encode_preview_png(image):
 def _rebuild_preview_locked():
     global _preview_display, _preview_png, _preview_version
 
+    target_aspect = DISPLAY_ASPECT if _preview_state.orientation == "portrait" else (1.0 / DISPLAY_ASPECT)
+
     transformed = apply_transform(
         _preview_source,
         rotation=_preview_state.rotation,
         crop=_preview_state.crop,
         fill=_preview_state.fill,
+        target_aspect=target_aspect,
     )
     if _preview_state.orientation == "landscape":
         transformed = transformed.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
