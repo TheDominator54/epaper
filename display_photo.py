@@ -258,10 +258,6 @@ HTML_PAGE = """<!DOCTYPE html>
 body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;padding:1.5rem 1.25rem;background:#0d0d0d;color:#e8e8e8;line-height:1.5;font-size:15px;}
 h1{font-size:1.5rem;font-weight:600;margin:0 0 0.5rem;letter-spacing:-0.02em;}
 .subtitle{color:#888;font-size:0.9rem;margin-bottom:1.5rem;}
-.howto{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:1rem 1.15rem;margin-bottom:1.5rem;font-size:0.9rem;color:#aaa;}
-.howto strong{color:#ccc;}
-.howto ol{margin:0.35rem 0 0 1.25rem;padding:0;}
-.howto li{margin:0.25rem 0;}
 .card{background:#161616;border:1px solid #252525;border-radius:10px;padding:1.15rem;margin-bottom:1.25rem;}
 .card-title{font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-bottom:0.6rem;}
 label{font-size:0.85rem;color:#999;display:block;margin-bottom:0.35rem;}
@@ -303,57 +299,47 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
   <p class="subtitle">Send images or text to your 13.3\u201d display</p>
 </header>
 
-<div class="howto">
-  <strong>How to use</strong>
-  <ol>
-    <li>Set <strong>Preview orientation</strong> to match how your display is mounted (portrait or landscape).</li>
-    <li>Load content: choose an <strong>image</strong> (file or URL) or type <strong>text</strong>, then click Load.</li>
-    <li>Optional: rotate, crop, or use \u201cCrop to fill screen\u201d in the preview.</li>
-    <li>Click <strong>Display on e-paper</strong> to send to the display (~19s refresh).</li>
-  </ol>
-</div>
-
 <div class="card">
-  <div class="card-title">1. Preview orientation</div>
+  <div class="card-title">Preview orientation</div>
   <div class="orientation-row">
-    <button type="button" id="oriPortrait" class="btn-ori">Portrait</button>
-    <button type="button" id="oriLandscape" class="btn-ori active">Landscape</button>
+    <button type="button" id="oriPortrait" class="btn-ori" onclick="epaperOrientation(\u0027portrait\u0027)">Portrait</button>
+    <button type="button" id="oriLandscape" class="btn-ori active" onclick="epaperOrientation(\u0027landscape\u0027)">Landscape</button>
   </div>
-  <p class="preview-caption">Portrait = tall; Landscape = wide. Pick what matches your display.</p>
+  <p class="preview-caption">Portrait = tall; Landscape = wide.</p>
 </div>
 
 <div class="card">
-  <div class="card-title">2a. Image (file or URL)</div>
+  <div class="card-title">Image (file or URL)</div>
   <div class="source-row">
-    <input type="file" id="fileIn" accept="image/*" aria-label="Choose image file">
+    <input type="file" id="fileIn" accept="image/*">
     <span class="divider">or</span>
     <input type="url" id="urlIn" placeholder="Paste image URL">
-    <button type="button" id="loadBtn" class="btn-primary">Load image</button>
+    <button type="button" id="loadBtn" class="btn-primary" onclick="epaperLoadImage()">Load image</button>
   </div>
 </div>
 
 <div class="card">
-  <div class="card-title">2b. Or type text</div>
+  <div class="card-title">Or type text</div>
   <textarea id="textIn" placeholder="Type your message here..." rows="3"></textarea>
   <div class="text-row">
     <label>Font size</label>
-    <input type="number" id="fontSize" min="24" max="200" value="72" aria-label="Font size">
-    <button type="button" id="loadTextBtn" class="btn-primary">Load text</button>
+    <input type="number" id="fontSize" min="24" max="200" value="72">
+    <button type="button" id="loadTextBtn" class="btn-primary" onclick="epaperLoadText()">Load text</button>
   </div>
 </div>
 
 <div class="preview-wrap" id="previewWrap">
   <div class="card">
-    <div class="card-title">3. Preview &amp; adjust</div>
-    <p class="preview-caption">This is how it will look on the display (1200\u00d71600).</p>
+    <div class="card-title">Preview &amp; adjust</div>
+    <p class="preview-caption">Display 1200\u00d71600.</p>
     <canvas id="preview" width="400" height="300"></canvas>
     <div class="controls">
-      <div class="row"><label>Rotate</label><button type="button" id="rotL" class="btn-secondary">\u21b6 Left</button><button type="button" id="rotR" class="btn-secondary">Right \u21b7</button></div>
+      <div class="row"><label>Rotate</label><button type="button" id="rotL" class="btn-secondary" onclick="epaperRotate(-90)">\u21b6 Left</button><button type="button" id="rotR" class="btn-secondary" onclick="epaperRotate(90)">Right \u21b7</button></div>
       <label>Crop in: <span id="cropPct">100</span>%</label>
-      <input type="range" id="cropSl" min="25" max="100" value="100" step="5" aria-label="Crop amount">
-      <div class="row"><button type="button" id="fillBtn" class="btn-secondary">Crop to fill screen</button></div>
+      <input type="range" id="cropSl" min="25" max="100" value="100" step="5" oninput="epaperCrop(this.value)">
+      <div class="row"><button type="button" id="fillBtn" class="btn-secondary" onclick="epaperFill()">Crop to fill screen</button></div>
     </div>
-    <button type="button" id="displayBtn" class="btn-primary" disabled>4. Display on e-paper</button>
+    <button type="button" id="displayBtn" class="btn-primary" disabled onclick="epaperDisplay()">Display on e-paper</button>
   </div>
 </div>
 
@@ -368,7 +354,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 </div>
 <div id="msg" class="msg"></div>
 <script>
-console.log("[epaper] Script loaded");
 (function(){
   var q = new URLSearchParams(location.search);
   var m = document.getElementById("msg");
@@ -385,15 +370,13 @@ function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
 function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
 function setFill(v){ fillMode = !!v; var fb = document.getElementById("fillBtn"); if (fb) fb.textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
 function syncRotCrop(){ var cp = document.getElementById("cropPct"); if (cp) cp.textContent = Math.round(crop * 100); }
-function showPreview(){ console.log("[epaper] showPreview"); var pw = document.getElementById("previewWrap"); var db = document.getElementById("displayBtn"); if (pw) pw.classList.add("show"); if (db) db.disabled = false; }
+function showPreview(){ var pw = document.getElementById("previewWrap"); var db = document.getElementById("displayBtn"); if (pw) pw.classList.add("show"); if (db) db.disabled = false; }
 function loadImage(src, isBlobUrl){
-  console.log("[epaper] loadImage called, isBlobUrl=" + isBlobUrl, typeof src);
   if (imgEl && isBlobUrl && imgEl.src && imgEl.src.indexOf("blob:") === 0) URL.revokeObjectURL(imgEl.src);
   imgEl = new Image();
-  imgEl.onload = function(){ console.log("[epaper] image onload, size=" + imgEl.naturalWidth + "x" + imgEl.naturalHeight); rot = 0; crop = 1; fillMode = false; setFill(false); var cs = document.getElementById("cropSl"); if (cs) cs.value = 100; syncRotCrop(); drawPreview(); showPreview(); };
-  imgEl.onerror = function(){ console.log("[epaper] image onerror"); alert("Failed to load image"); };
+  imgEl.onload = function(){ rot = 0; crop = 1; fillMode = false; setFill(false); var cs = document.getElementById("cropSl"); if (cs) cs.value = 100; syncRotCrop(); drawPreview(); showPreview(); };
+  imgEl.onerror = function(){ alert("Failed to load image"); };
   imgEl.src = src;
-  console.log("[epaper] imgEl.src set");
 }
 function renderTextToCanvas(text, fontSize){
   var c = document.createElement("canvas");
@@ -483,70 +466,57 @@ function setPreviewOrientation(ori){
   if (ol) ol.classList.toggle("active", ori === "landscape");
   drawPreview();
 }
-document.body.addEventListener("click", function(e){
-  var id = e.target && e.target.id;
-  if (!id) return;
-  if (e.target.tagName !== "BUTTON" && e.target.tagName !== "INPUT") return;
-  if (id === "loadBtn") {
-    e.preventDefault();
-    console.log("[epaper] Load clicked");
-    var fileInput = document.getElementById("fileIn");
-    var urlInput = document.getElementById("urlIn");
-    var f = fileInput && fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
-    var u = (urlInput && urlInput.value) ? String(urlInput.value).trim() : "";
-    console.log("[epaper] file=" + (f ? f.name : "none"), "url=" + (u ? "set" : "empty"));
-    if (f) {
-      currentFile = f; currentUrl = null; currentText = null;
-      loadImage(URL.createObjectURL(f), true);
-    } else if (u) {
-      currentFile = null; currentUrl = u; currentText = null;
-      e.target.disabled = true; e.target.textContent = "Loading...";
-      fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ if (!r.ok) throw new Error(); return r.blob(); }).then(function(blob){ loadImage(URL.createObjectURL(blob), true); e.target.disabled = false; e.target.textContent = "Load"; }).catch(function(){ e.target.disabled = false; e.target.textContent = "Load"; alert("Failed to load image"); });
-    } else { alert("Choose a file or enter a URL"); }
-    return;
+window.epaperOrientation = function(ori){ console.log("[epaper] orientation", ori); setPreviewOrientation(ori); };
+window.epaperLoadImage = function(){
+  console.log("[epaper] Load image");
+  var fileInput = document.getElementById("fileIn");
+  var urlInput = document.getElementById("urlIn");
+  var f = fileInput && fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
+  var u = (urlInput && urlInput.value) ? String(urlInput.value).trim() : "";
+  if (f) {
+    currentFile = f; currentUrl = null; currentText = null;
+    loadImage(URL.createObjectURL(f), true);
+  } else if (u) {
+    currentFile = null; currentUrl = u; currentText = null;
+    var btn = document.getElementById("loadBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Loading..."; }
+    fetch("/preview?url=" + encodeURIComponent(u)).then(function(r){ if (!r.ok) throw new Error(); return r.blob(); }).then(function(blob){ loadImage(URL.createObjectURL(blob), true); if (btn) { btn.disabled = false; btn.textContent = "Load image"; } }).catch(function(){ if (btn) { btn.disabled = false; btn.textContent = "Load image"; } alert("Failed to load image"); });
+  } else { alert("Choose a file or enter a URL"); }
+};
+window.epaperLoadText = function(){
+  console.log("[epaper] Load text");
+  var textIn = document.getElementById("textIn");
+  var fontSizeIn = document.getElementById("fontSize");
+  var text = textIn ? textIn.value.trim() : "";
+  if (!text) { alert("Enter some text"); return; }
+  var fs = fontSizeIn ? parseInt(fontSizeIn.value, 10) : 72;
+  fs = Math.max(24, Math.min(200, fs || 72));
+  currentFile = null; currentUrl = null; currentText = text; currentFontSize = fs;
+  loadImage(renderTextToCanvas(text, fs), true);
+};
+window.epaperRotate = function(d){ console.log("[epaper] rotate", d); setRot(d); };
+window.epaperCrop = function(v){ console.log("[epaper] crop", v); setCrop(parseFloat(v, 10) / 100); };
+window.epaperFill = function(){ console.log("[epaper] fill"); setFill(!fillMode); };
+window.epaperDisplay = function(){
+  console.log("[epaper] display");
+  var btn = document.getElementById("displayBtn");
+  if (btn) btn.disabled = true;
+  function done(r){ r.text().then(function(html){ document.open(); document.write(html); document.close(); }).catch(function(){ if (btn) btn.disabled = false; }); }
+  if (currentFile) {
+    var fd = new FormData();
+    fd.append("photo", currentFile);
+    fd.append("rotation", String(rot));
+    fd.append("crop", String(crop));
+    fd.append("fill", fillMode ? "1" : "0");
+    fetch("/display", { method: "POST", body: fd }).then(done).catch(function(){ if (btn) btn.disabled = false; });
+  } else if (currentUrl) {
+    var body = "url=" + encodeURIComponent(currentUrl) + "&rotation=" + rot + "&crop=" + crop + "&fill=" + (fillMode ? "1" : "0");
+    fetch("/display_url", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ if (btn) btn.disabled = false; });
+  } else if (currentText) {
+    var body = "text=" + encodeURIComponent(currentText) + "&font_size=" + currentFontSize;
+    fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ if (btn) btn.disabled = false; });
   }
-  if (id === "loadTextBtn") {
-    e.preventDefault();
-    var textIn = document.getElementById("textIn");
-    var fontSizeIn = document.getElementById("fontSize");
-    var text = textIn ? textIn.value.trim() : "";
-    if (!text) { alert("Enter some text"); return; }
-    var fs = fontSizeIn ? parseInt(fontSizeIn.value, 10) : 72;
-    fs = Math.max(24, Math.min(200, fs || 72));
-    currentFile = null; currentUrl = null; currentText = text; currentFontSize = fs;
-    loadImage(renderTextToCanvas(text, fs), true);
-    return;
-  }
-  if (id === "oriPortrait") { e.preventDefault(); setPreviewOrientation("portrait"); return; }
-  if (id === "oriLandscape") { e.preventDefault(); setPreviewOrientation("landscape"); return; }
-  if (id === "rotL") { e.preventDefault(); setRot(-90); return; }
-  if (id === "rotR") { e.preventDefault(); setRot(90); return; }
-  if (id === "fillBtn") { e.preventDefault(); setFill(!fillMode); return; }
-  if (id === "displayBtn") {
-    e.preventDefault();
-    var btn = e.target;
-    btn.disabled = true;
-    function done(r){ r.text().then(function(html){ document.open(); document.write(html); document.close(); }).catch(function(){ btn.disabled = false; }); }
-    if (currentFile) {
-      var fd = new FormData();
-      fd.append("photo", currentFile);
-      fd.append("rotation", String(rot));
-      fd.append("crop", String(crop));
-      fd.append("fill", fillMode ? "1" : "0");
-      fetch("/display", { method: "POST", body: fd }).then(done).catch(function(){ btn.disabled = false; });
-    } else if (currentUrl) {
-      var body = "url=" + encodeURIComponent(currentUrl) + "&rotation=" + rot + "&crop=" + crop + "&fill=" + (fillMode ? "1" : "0");
-      fetch("/display_url", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
-    } else if (currentText) {
-      var body = "text=" + encodeURIComponent(currentText) + "&font_size=" + currentFontSize;
-      fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ btn.disabled = false; });
-    }
-  }
-});
-document.body.addEventListener("input", function(e){
-  if (e.target && e.target.id === "cropSl") setCrop(parseFloat(e.target.value, 10) / 100);
-});
-console.log("[epaper] Event listeners attached");
+};
 </script>
 </body></html>
 """
