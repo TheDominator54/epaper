@@ -75,6 +75,7 @@ _preview_state = PreviewState()
 _preview_display = None
 _preview_png = None
 _preview_version = 0
+_preview_source_kind = "image"
 
 
 def parse_content_length(raw_value):
@@ -413,11 +414,12 @@ def _rebuild_preview_locked():
     }
 
 
-def set_preview_source(image, orientation="landscape"):
-    global _preview_source, _preview_state
+def set_preview_source(image, orientation="landscape", source_kind="image"):
+    global _preview_source, _preview_state, _preview_source_kind
     with _preview_lock:
         _preview_source = image.convert("RGB")
         _preview_state = PreviewState(orientation=parse_orientation(orientation))
+        _preview_source_kind = source_kind
         return _rebuild_preview_locked()
 
 
@@ -450,6 +452,11 @@ def display_preview_buffer():
         if _preview_display is None:
             raise ValueError("No preview image available")
         image = _preview_display.copy()
+        source_kind = _preview_source_kind
+        orientation = _preview_state.orientation
+    if source_kind == "text" and orientation == "landscape":
+        # Keep preview behavior unchanged; correct only final panel output for text in landscape.
+        image = image.rotate(180, expand=False)
     show_image_on_epd(image)
 
 
@@ -1154,6 +1161,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Multipart upload must include field 'photo'")
             orientation = parse_orientation(form.get("orientation"))
             image = load_image_from_bytes(data)
+            source_kind = "image"
         else:
             payload = self._read_json()
             mode = str(payload.get("mode", "")).strip().lower()
@@ -1164,16 +1172,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not url:
                     raise ValueError("Missing url")
                 image = load_image_from_bytes(fetch_image(url))
+                source_kind = "image"
             elif mode == "text":
                 text = str(payload.get("text", ""))
                 if not text.strip():
                     raise ValueError("Missing text")
                 font_size = parse_font_size(payload.get("font_size"))
                 image = render_text_to_image(text.strip(), font_size=font_size)
+                source_kind = "text"
             else:
                 raise ValueError("Invalid source mode. Use multipart file or JSON mode=url|text")
 
-        state = set_preview_source(image, orientation=orientation)
+        state = set_preview_source(image, orientation=orientation, source_kind=source_kind)
         self._send_json(200, {"ok": True, "state": state})
 
     def _api_preview_transform(self):
