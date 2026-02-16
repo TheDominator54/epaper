@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Change to User=root if SPI/GPIO fails as your user
-User=dominic
+# install-service.sh replaces SERVICE_USER with your login user
+# Change to root only if SPI/GPIO access fails with your user
+User=SERVICE_USER
 WorkingDirectory=REPO_DIR
 ExecStart=/usr/bin/python3 REPO_DIR/display_photo.py
 Restart=on-failure

@@ -11,14 +11,18 @@ python3 display_photo.py
 
 Then open http://localhost:5000 (or http://\<pi-ip\>:5000 from another device).
 
+Health check:
+
+```bash
+curl http://localhost:5000/api/status
+```
+
 ## Install service (run at boot)
 
 ```bash
 cd ~/epaper
 sudo sh install-service.sh
 ```
-
-Edit `epaper.service` first if your username is not `dominic` (change `User=`).
 
 ## Control the background service
 
@@ -47,4 +51,15 @@ python3 display_photo.py https://example.com/photo.jpg
 
 # Clear screen
 python3 display_photo.py --clear
+```
+
+## Reliability defaults
+
+- Max upload size: 12 MB (`POST /api/upload`)
+- Max fetched URL image size: 12 MB
+- URL fetch accepts `http`/`https` only
+- Private-network URLs are blocked by default; allow them by setting:
+
+```bash
+export EPAPER_ALLOW_PRIVATE_URLS=1
 ```

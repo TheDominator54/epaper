@@ -10,13 +10,16 @@ Run from repo root. No extra installs; uses same deps as the demo.
   API (when server is running):
     POST /api/upload  → body: multipart form field "photo" or raw image (Content-Type: image/...). Returns JSON.
     POST /api/clear   → clear screen. Returns JSON.
+    GET /api/status   → health + current limits. Returns JSON.
 """
 import io
+import ipaddress
 import json
 import os
 import re
+import socket
 import sys
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Run from repo root: lib is python/lib
@@ -26,13 +29,136 @@ if os.path.exists(_libdir):
     sys.path.insert(0, _libdir)
 
 import epd13in3E
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 EPD_WIDTH = 1200
 EPD_HEIGHT = 1600
+MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+MAX_FORM_BYTES = 256 * 1024
+MAX_FETCH_BYTES = 12 * 1024 * 1024
+MAX_IMAGE_PIXELS = 30_000_000
+FETCH_TIMEOUT_SECONDS = 30
+ALLOWED_ROTATIONS = {0, 90, 180, 270}
+ALLOW_PRIVATE_URLS = os.environ.get("EPAPER_ALLOW_PRIVATE_URLS", "").lower() in ("1", "true", "yes")
 
 # One EPD instance, init on first use
 _epd = None
+
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
+
+def parse_content_length(raw_value):
+    if raw_value in (None, ""):
+        return 0
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError("Invalid Content-Length header")
+    if value < 0:
+        raise ValueError("Invalid Content-Length header")
+    return value
+
+
+def read_limited_body(rfile, content_length, max_bytes):
+    if content_length > max_bytes:
+        raise ValueError("Request body is too large")
+    remaining = content_length
+    chunks = []
+    while remaining > 0:
+        chunk = rfile.read(min(65536, remaining))
+        if not chunk:
+            raise ValueError("Unexpected end of request body")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def parse_rotation(value):
+    try:
+        rotation = int(value or 0) % 360
+    except (TypeError, ValueError):
+        return 0
+    return rotation if rotation in ALLOWED_ROTATIONS else 0
+
+
+def parse_crop(value):
+    try:
+        crop = float(value or "1")
+    except (TypeError, ValueError):
+        crop = 1.0
+    return max(0.25, min(1.0, crop))
+
+
+def parse_font_size(value):
+    try:
+        size = int(value or "72")
+    except (TypeError, ValueError):
+        size = 72
+    return max(12, min(200, size))
+
+
+def is_truthy(value):
+    return str(value or "").strip().lower() in ("1", "on", "true", "yes")
+
+
+def _blocked_ip(ip_text):
+    ip = ipaddress.ip_address(ip_text)
+    if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return True
+    if not ALLOW_PRIVATE_URLS and ip.is_private:
+        return True
+    return False
+
+
+def validate_remote_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Only http/https URLs are supported")
+    if not parsed.hostname:
+        raise ValueError("URL must include a host")
+    if parsed.username or parsed.password:
+        raise ValueError("URL auth credentials are not supported")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise ValueError("Could not resolve URL host") from e
+    for info in infos:
+        ip_text = info[4][0]
+        if _blocked_ip(ip_text):
+            if ALLOW_PRIVATE_URLS:
+                raise ValueError("URL host resolved to a blocked local address")
+            raise ValueError("URL host must resolve to a public IP address")
+
+
+def load_image_from_bytes(data):
+    if not data:
+        raise ValueError("No image data provided")
+    try:
+        image = Image.open(io.BytesIO(data))
+        if (image.width * image.height) > MAX_IMAGE_PIXELS:
+            raise ValueError("Image is too large")
+        image.load()
+    except UnidentifiedImageError as e:
+        raise ValueError("Invalid image format") from e
+    except ValueError:
+        raise
+    except (Image.DecompressionBombError, OSError) as e:
+        raise ValueError("Image file is invalid or too large") from e
+    return image
+
+
+def sniff_image_content_type(data):
+    image = load_image_from_bytes(data)
+    fmt = (image.format or "JPEG").upper()
+    if fmt in ("JPEG", "JPG"):
+        return "image/jpeg"
+    if fmt == "PNG":
+        return "image/png"
+    if fmt == "GIF":
+        return "image/gif"
+    if fmt == "WEBP":
+        return "image/webp"
+    return "image/jpeg"
 
 
 def get_epd():
@@ -45,9 +171,28 @@ def get_epd():
 
 def fetch_image(url):
     import urllib.request
+    validate_remote_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": "e-Paper/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read()
+    with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_SECONDS) as r:
+        header_len = r.headers.get("Content-Length")
+        if header_len:
+            try:
+                declared_len = int(header_len)
+            except ValueError:
+                raise ValueError("Invalid response Content-Length")
+            if declared_len > MAX_FETCH_BYTES:
+                raise ValueError("Remote image is too large")
+        chunks = []
+        total = 0
+        while True:
+            chunk = r.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_FETCH_BYTES:
+                raise ValueError("Remote image is too large")
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
 DISPLAY_ASPECT = EPD_WIDTH / EPD_HEIGHT  # 1200/1600 = 0.75 (portrait)
@@ -145,13 +290,17 @@ def render_text_to_image(text, font_size=72):
 
 def parse_multipart_form(rfile, content_type, content_length):
     """Parse multipart/form-data. Returns (photo_bytes or None, fields_dict)."""
-    m = re.search(r'boundary=([^;\s]+)', content_type)
+    m = re.search(r'boundary=(?:"([^"]+)"|([^;\s]+))', content_type, flags=re.IGNORECASE)
     if not m:
         return None, {}
-    boundary = m.group(1).strip().encode("latin-1")
+    boundary_token = (m.group(1) or m.group(2) or "").strip()
+    if not boundary_token:
+        return None, {}
+    boundary = boundary_token.encode("latin-1")
     if not boundary.startswith(b"--"):
         boundary = b"--" + boundary
-    body = rfile.read(int(content_length or 0))
+    length = parse_content_length(content_length)
+    body = read_limited_body(rfile, length, MAX_UPLOAD_BYTES)
     parts = body.split(boundary)
     photo = None
     fields = {}
@@ -212,6 +361,7 @@ API_DOCS_HTML = """<!DOCTYPE html>
   <ul>
     <li><strong>Multipart form:</strong> <code>photo</code> (file, required). Optional: <code>rotation</code> (0|90|180|270), <code>crop</code> (0.25–1.0, center crop %), <code>fill</code> (1|on|true to crop to 3:4 and fill screen).</li>
     <li><strong>Raw image:</strong> Body = image bytes, <code>Content-Type: image/jpeg</code> (or image/png, etc.). No form fields in this case.</li>
+    <li><strong>Limits:</strong> upload body max 12MB; image must be a valid raster format.</li>
   </ul>
   <p><strong>Example (curl, multipart):</strong></p>
   <pre>curl -X POST -F "photo=@/path/to/image.jpg" -F "rotation=90" -F "crop=0.8" -F "fill=0" http://localhost:5000/api/upload</pre>
@@ -226,6 +376,12 @@ API_DOCS_HTML = """<!DOCTYPE html>
   <p><strong>Example:</strong></p>
   <pre>curl -X POST http://localhost:5000/api/clear</pre>
   <p><strong>Success:</strong> <code>200 {"ok": true, "message": "Screen cleared"}</code></p>
+
+  <h2>GET /api/status</h2>
+  <p>Check service health and current limits.</p>
+  <p><strong>Example:</strong></p>
+  <pre>curl http://localhost:5000/api/status</pre>
+  <p><strong>Success:</strong> <code>200 {"ok": true, "service": "epaper", ...}</code></p>
 
   <h2>POST /display_text</h2>
   <p>Display text on the e-paper (wrapped and centered). Web UI uses this for the text source.</p>
@@ -243,7 +399,7 @@ API_DOCS_HTML = """<!DOCTYPE html>
   </table>
   <p><strong>Example:</strong></p>
   <pre>GET /preview?url=https%3A%2F%2Fexample.com%2Fphoto.jpg</pre>
-  <p>Returns the image bytes with appropriate <code>Content-Type</code>, or <code>502</code> if the URL cannot be fetched.</p>
+  <p>Returns the image bytes with appropriate <code>Content-Type</code>. Only <code>http/https</code> URLs are accepted.</p>
 
   <p style="margin-top: 2rem;"><a href="/">← Back to Web UI</a></p>
 </body>
@@ -354,6 +510,7 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 </div>
 <div id="msg" class="msg"></div>
 <script>
+console.log("[epaper] script start");
 (function(){
   var q = new URLSearchParams(location.search);
   var m = document.getElementById("msg");
@@ -367,7 +524,7 @@ var DISP_W = 1200, DISP_H = 1600, ASPECT = DISP_W / DISP_H;
 var rot = 0, crop = 1, fillMode = false, imgEl = null, currentFile = null, currentUrl = null, currentText = null, currentFontSize = 72;
 var previewOrientation = "landscape";
 function setRot(d){ rot = (rot + d + 360) % 360; syncRotCrop(); drawPreview(); }
-function setCrop(v){ crop = Math.max(0.25, Math.min(1, v)); syncRotCrop(); drawPreview(); }
+function setCrop(v){ var n = Number(v); if (!isFinite(n)) n = 1; crop = Math.max(0.25, Math.min(1, n)); syncRotCrop(); drawPreview(); }
 function setFill(v){ fillMode = !!v; var fb = document.getElementById("fillBtn"); if (fb) fb.textContent = fillMode ? "Fill screen (on)" : "Crop to fill screen"; drawPreview(); }
 function syncRotCrop(){ var cp = document.getElementById("cropPct"); if (cp) cp.textContent = Math.round(crop * 100); }
 function showPreview(){ var pw = document.getElementById("previewWrap"); var db = document.getElementById("displayBtn"); if (pw) pw.classList.add("show"); if (db) db.disabled = false; }
@@ -390,7 +547,7 @@ function renderTextToCanvas(text, fontSize){
   var maxW = DISP_W - 80, lineHeight = fontSize + Math.floor(fontSize/4), lines = [];
   var paras = (text || "").trim().split("\n");
   for (var p = 0; p < paras.length; p++) {
-    var words = paras[p].split(/\s+/);
+    var words = paras[p].split(/\\s+/);
     var cur = [];
     for (var i = 0; i < words.length; i++) {
       var trial = (cur.length ? cur.join(" ") + " " : "") + words[i];
@@ -439,7 +596,7 @@ function drawPreview(){
   octx.drawImage(temp, sx, sy, cw, ch, dx, dy, dw, dh);
   var c = document.getElementById("preview");
   if (!c) return;
-  var scale = 0.25;
+  var previewScale = 0.25;
   if (previewOrientation === "portrait") {
     c.width = 300; c.height = 400;
     var ctx = c.getContext("2d");
@@ -454,7 +611,7 @@ function drawPreview(){
     ctx.save();
     ctx.translate(200, 150);
     ctx.rotate(-90 * Math.PI / 180);
-    ctx.scale(scale, scale);
+    ctx.scale(previewScale, previewScale);
     ctx.drawImage(off, 0, 0, DISP_W, DISP_H, -DISP_W/2, -DISP_H/2, DISP_W, DISP_H);
     ctx.restore();
   }
@@ -495,26 +652,31 @@ window.epaperLoadText = function(){
   loadImage(renderTextToCanvas(text, fs), true);
 };
 window.epaperRotate = function(d){ console.log("[epaper] rotate", d); setRot(d); };
-window.epaperCrop = function(v){ console.log("[epaper] crop", v); setCrop(parseFloat(v, 10) / 100); };
+window.epaperCrop = function(v){ console.log("[epaper] crop", v); setCrop(Number(v) / 100); };
 window.epaperFill = function(){ console.log("[epaper] fill"); setFill(!fillMode); };
 window.epaperDisplay = function(){
   console.log("[epaper] display");
   var btn = document.getElementById("displayBtn");
-  if (btn) btn.disabled = true;
-  function done(r){ r.text().then(function(html){ document.open(); document.write(html); document.close(); }).catch(function(){ if (btn) btn.disabled = false; }); }
+  var oldBtnText = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Sending..."; }
+  function restoreButton(){ if (btn) { btn.disabled = false; btn.textContent = oldBtnText || "Display on e-paper"; } }
+  function fail(){ restoreButton(); alert("Display failed. Check your input and try again."); }
+  function done(r){ r.text().then(function(html){ document.open(); document.write(html); document.close(); }).catch(fail); }
   if (currentFile) {
     var fd = new FormData();
     fd.append("photo", currentFile);
     fd.append("rotation", String(rot));
     fd.append("crop", String(crop));
     fd.append("fill", fillMode ? "1" : "0");
-    fetch("/display", { method: "POST", body: fd }).then(done).catch(function(){ if (btn) btn.disabled = false; });
+    fetch("/display", { method: "POST", body: fd }).then(done).catch(fail);
   } else if (currentUrl) {
     var body = "url=" + encodeURIComponent(currentUrl) + "&rotation=" + rot + "&crop=" + crop + "&fill=" + (fillMode ? "1" : "0");
-    fetch("/display_url", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ if (btn) btn.disabled = false; });
+    fetch("/display_url", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(fail);
   } else if (currentText) {
     var body = "text=" + encodeURIComponent(currentText) + "&font_size=" + currentFontSize;
-    fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(function(){ if (btn) btn.disabled = false; });
+    fetch("/display_text", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body }).then(done).catch(fail);
+  } else {
+    fail();
   }
 };
 </script>
@@ -536,6 +698,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(HTML_PAGE.encode("utf-8"))
+        elif path == "/api/status":
+            self._api_status()
         elif path == "/preview":
             self._preview_proxy()
         elif path == "/api/docs":
@@ -556,14 +720,15 @@ class Handler(BaseHTTPRequestHandler):
         url = url.strip()
         try:
             data = fetch_image(url)
-            image = Image.open(io.BytesIO(data))
-            fmt = (image.format or "JPEG").upper()
-            ct = "image/jpeg" if fmt in ("JPEG", "JPG") else "image/png" if fmt == "PNG" else "image/gif" if fmt == "GIF" else "image/webp" if fmt == "WEBP" else "image/jpeg"
+            ct = sniff_image_content_type(data)
             self.send_response(200)
             self.send_header("Content-type", ct)
             self.send_header("Content-length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+        except ValueError as e:
+            print("Preview proxy error:", e)
+            self.send_error(400, str(e))
         except Exception as e:
             print("Preview proxy error:", e)
             self.send_error(502, "Failed to fetch image")
@@ -596,17 +761,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not data:
                     self.send_redirect("/?display=err")
                     return
-                rotation = int(form.get("rotation") or 0) % 360
-                fill = form.get("fill", "").lower() in ("1", "on", "true", "yes")
-                try:
-                    crop = float(form.get("crop") or "1")
-                except (TypeError, ValueError):
-                    crop = 1.0
-                crop = max(0.25, min(1.0, crop))
-                image = Image.open(io.BytesIO(data))
+                rotation = parse_rotation(form.get("rotation"))
+                fill = is_truthy(form.get("fill"))
+                crop = parse_crop(form.get("crop"))
+                image = load_image_from_bytes(data)
                 image = apply_transform(image, rotation=rotation, crop=crop, fill=fill)
                 show_image_on_epd(image)
                 self.send_redirect("/?display=ok")
+            except ValueError as e:
+                print("Display error:", e)
+                self.send_redirect("/?display=err")
             except Exception as e:
                 print("Display error:", e)
                 self.send_redirect("/?display=err")
@@ -624,41 +788,46 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def _display_url_redirect(self):
-        cl = int(self.headers.get("Content-length", "0") or 0)
-        body = self.rfile.read(cl).decode("utf-8", errors="replace")
+        try:
+            cl = parse_content_length(self.headers.get("Content-length", "0"))
+            body = read_limited_body(self.rfile, cl, MAX_FORM_BYTES).decode("utf-8", errors="replace")
+        except ValueError as e:
+            print("Display from URL parse error:", e)
+            self.send_redirect("/?display=err")
+            return
         params = parse_qs(body)
         url = (params.get("url") or [None])[0]
         if not url or not url.strip():
             self.send_redirect("/?display=err")
             return
         url = url.strip()
-        rotation = int((params.get("rotation") or ["0"])[0] or 0) % 360
-        fill = ((params.get("fill") or [""])[0] or "").lower() in ("1", "on", "true", "yes")
-        try:
-            crop = float((params.get("crop") or ["1"])[0] or "1")
-        except (TypeError, ValueError):
-            crop = 1.0
-        crop = max(0.25, min(1.0, crop))
+        rotation = parse_rotation((params.get("rotation") or ["0"])[0])
+        fill = is_truthy((params.get("fill") or [""])[0])
+        crop = parse_crop((params.get("crop") or ["1"])[0])
         try:
             data = fetch_image(url)
-            image = Image.open(io.BytesIO(data))
+            image = load_image_from_bytes(data)
             image = apply_transform(image, rotation=rotation, crop=crop, fill=fill)
             show_image_on_epd(image)
             self.send_redirect("/?display=ok")
+        except ValueError as e:
+            print("Display from URL error:", e)
+            self.send_redirect("/?display=err")
         except Exception as e:
             print("Display from URL error:", e)
             self.send_redirect("/?display=err")
 
     def _display_text_redirect(self):
-        cl = int(self.headers.get("Content-length", "0") or 0)
-        body = self.rfile.read(cl).decode("utf-8", errors="replace")
+        try:
+            cl = parse_content_length(self.headers.get("Content-length", "0"))
+            body = read_limited_body(self.rfile, cl, MAX_FORM_BYTES).decode("utf-8", errors="replace")
+        except ValueError as e:
+            print("Display text parse error:", e)
+            self.send_redirect("/?display=err")
+            return
         params = parse_qs(body)
         text = (params.get("text") or [""])[0] or ""
-        try:
-            font_size = int((params.get("font_size") or ["72"])[0] or "72")
-        except (TypeError, ValueError):
-            font_size = 72
-        font_size = max(12, min(200, font_size))
+        font_size = parse_font_size((params.get("font_size") or ["72"])[0])
         if not text.strip():
             self.send_redirect("/?display=err")
             return
@@ -680,25 +849,46 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api_upload(self):
         ct = self.headers.get("Content-type", "")
-        cl = int(self.headers.get("Content-length", "0") or 0)
+        try:
+            cl = parse_content_length(self.headers.get("Content-length", "0"))
+        except ValueError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+            return
+        if cl <= 0:
+            self._send_json(400, {"ok": False, "error": "Request body is empty"})
+            return
+        if cl > MAX_UPLOAD_BYTES:
+            self._send_json(413, {"ok": False, "error": "Image upload exceeds 12MB limit"})
+            return
         data = None
         form = {}
         if ct.startswith("multipart/form-data"):
-            data, form = parse_multipart_form(self.rfile, ct, str(cl))
+            try:
+                data, form = parse_multipart_form(self.rfile, ct, str(cl))
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+                return
         elif ct.startswith("image/"):
-            data = self.rfile.read(cl) if cl else b""
+            try:
+                data = read_limited_body(self.rfile, cl, MAX_UPLOAD_BYTES)
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+                return
+        else:
+            self._send_json(400, {"ok": False, "error": "Unsupported Content-Type; use multipart/form-data or image/*"})
+            return
         if not data:
             self._send_json(400, {"ok": False, "error": "Send image as multipart form field 'photo' or raw body with Content-Type: image/..."})
             return
-        rotation = int(form.get("rotation") or 0) % 360
-        fill = form.get("fill", "").lower() in ("1", "on", "true", "yes")
+        rotation = parse_rotation(form.get("rotation"))
+        fill = is_truthy(form.get("fill"))
+        crop = parse_crop(form.get("crop"))
         try:
-            crop = float(form.get("crop") or "1")
-        except (TypeError, ValueError):
-            crop = 1.0
-        crop = max(0.25, min(1.0, crop))
+            image = load_image_from_bytes(data)
+        except ValueError as e:
+            self._send_json(400, {"ok": False, "error": str(e)})
+            return
         try:
-            image = Image.open(io.BytesIO(data))
             image = apply_transform(image, rotation=rotation, crop=crop, fill=fill)
             show_image_on_epd(image)
             self._send_json(200, {"ok": True, "message": "Display updating (~19s)"})
@@ -714,6 +904,20 @@ class Handler(BaseHTTPRequestHandler):
             print("Clear error:", e)
             self._send_json(500, {"ok": False, "error": str(e)})
 
+    def _api_status(self):
+        self._send_json(200, {
+            "ok": True,
+            "service": "epaper",
+            "display": {"width": EPD_WIDTH, "height": EPD_HEIGHT},
+            "limits": {
+                "max_upload_bytes": MAX_UPLOAD_BYTES,
+                "max_fetch_bytes": MAX_FETCH_BYTES,
+                "max_form_bytes": MAX_FORM_BYTES,
+                "max_image_pixels": MAX_IMAGE_PIXELS,
+            },
+            "allow_private_urls": ALLOW_PRIVATE_URLS,
+        })
+
     def send_redirect(self, location):
         self.send_response(302)
         self.send_header("Location", location)
@@ -725,7 +929,7 @@ def run_server():
     server = HTTPServer(("0.0.0.0", port), Handler)
     print("e-Paper photo server: http://localhost:%s" % port)
     print("  Web UI: upload photo, Clear screen button")
-    print("  API: POST /api/upload (multipart 'photo' or raw image), POST /api/clear")
+    print("  API: POST /api/upload (multipart 'photo' or raw image), POST /api/clear, GET /api/status")
     print("  From another device: http://<pi-ip>:%s" % port)
     try:
         server.serve_forever()
@@ -748,7 +952,7 @@ def main():
         url = sys.argv[1]
         print("Fetching image...")
         data = fetch_image(url)
-        image = Image.open(io.BytesIO(data))
+        image = load_image_from_bytes(data)
         print("Displaying (refresh ~19s)...")
         show_image_on_epd(image)
         get_epd().sleep()
