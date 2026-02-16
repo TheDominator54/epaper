@@ -450,6 +450,10 @@ def display_preview_buffer():
         if _preview_display is None:
             raise ValueError("No preview image available")
         image = _preview_display.copy()
+        orientation = _preview_state.orientation
+    if orientation == "landscape":
+        # Match panel output to the landscape preview orientation.
+        image = image.rotate(180, expand=False)
     show_image_on_epd(image)
 
 
