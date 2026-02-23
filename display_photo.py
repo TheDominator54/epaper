@@ -20,6 +20,7 @@ Run from repo root. No extra installs; uses same deps as the demo.
     POST /api/rotation/settings
     POST /api/rotation/add
     POST /api/rotation/display_now
+    POST /api/rotation/jump
     POST /api/rotation/remove
     POST /api/rotation/clear
 """
@@ -753,6 +754,36 @@ def remove_rotation_item(item_id):
     return get_rotation_status()
 
 
+def jump_to_rotation_item(item_id):
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        raise ValueError("Missing item_id")
+
+    with _rotation_lock:
+        if not _rotation_state.items:
+            raise ValueError("Rotation queue is empty")
+
+        idx = -1
+        target = None
+        for i, item in enumerate(_rotation_state.items):
+            if item.item_id == item_id:
+                idx = i
+                target = item
+                break
+        if target is None:
+            raise ValueError("Rotation item not found")
+
+        image = _load_rotation_item_image(target)
+        _rotation_state.next_index = (idx + 1) % len(_rotation_state.items)
+        _rotation_state.last_switch_ts = time.time()
+        _persist_rotation_locked()
+
+    with _display_lock:
+        show_image_on_epd(image)
+
+    return get_rotation_status()
+
+
 def add_preview_to_rotation():
     with _preview_lock:
         if _preview_display is None:
@@ -920,6 +951,9 @@ API_DOCS_HTML = """<!DOCTYPE html>
 
   <h2>POST /api/rotation/display_now</h2>
   <pre>{"also_add": true}</pre>
+
+  <h2>POST /api/rotation/jump</h2>
+  <pre>{"item_id":"abc123..."}</pre>
 
   <h2>POST /api/rotation/remove</h2>
   <pre>{"item_id":"abc123..."}</pre>
@@ -1354,9 +1388,18 @@ HTML_PAGE = """<!DOCTYPE html>
         const del = document.createElement("button");
         del.type = "button";
         del.className = "btn-danger queue-delete";
+        del.dataset.action = "remove";
         del.dataset.itemId = item.item_id;
         del.textContent = "Delete";
         card.appendChild(del);
+
+        const jump = document.createElement("button");
+        jump.type = "button";
+        jump.className = "btn-secondary queue-delete";
+        jump.dataset.action = "jump";
+        jump.dataset.itemId = item.item_id;
+        jump.textContent = "Jump";
+        card.appendChild(jump);
 
         host.appendChild(card);
       }
@@ -1638,6 +1681,25 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
+    async function jumpToRotationQueueItem(itemId) {
+      if (!itemId) return;
+      setBusy(true);
+      setStatus("Jumping to queue item now...");
+      try {
+        const payload = await requestJSON("/api/rotation/jump", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item_id: itemId }),
+        }, { timeoutMs: 90000, retries: 0 });
+        applyRotationStatus(payload.rotation);
+        setStatus("Jumped to queue item now.", "ok");
+      } catch (err) {
+        setStatus(err.message || "Failed to jump to queue item.", "err");
+      } finally {
+        setBusy(false);
+      }
+    }
+
     async function clearDisplay() {
       setBusy(true);
       setStatus("Clearing display...");
@@ -1697,6 +1759,11 @@ HTML_PAGE = """<!DOCTYPE html>
     document.getElementById("rotationQueueList").addEventListener("click", (event) => {
       const btn = event.target.closest("button[data-item-id]");
       if (!btn) return;
+      const action = btn.dataset.action || "remove";
+      if (action === "jump") {
+        jumpToRotationQueueItem(btn.dataset.itemId);
+        return;
+      }
       removeRotationQueueItem(btn.dataset.itemId);
     });
     document.getElementById("clearBtn").addEventListener("click", clearDisplay);
@@ -1833,6 +1900,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/rotation/display_now":
                 self._api_rotation_display_now()
                 return
+            if path == "/api/rotation/jump":
+                self._api_rotation_jump()
+                return
             if path == "/api/rotation/remove":
                 self._api_rotation_remove()
                 return
@@ -1944,6 +2014,19 @@ class Handler(BaseHTTPRequestHandler):
                 "message": "Display updating (~19s)",
                 "result": result,
                 "rotation": get_rotation_status(),
+            },
+        )
+
+    def _api_rotation_jump(self):
+        payload = self._read_json()
+        item_id = payload.get("item_id")
+        status = jump_to_rotation_item(item_id)
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "message": "Display updating (~19s)",
+                "rotation": status,
             },
         )
 
