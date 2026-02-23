@@ -9,11 +9,17 @@ Run from repo root. No extra installs; uses same deps as the demo.
 
   API (when server is running):
     GET  /api/status
+    GET  /api/rotation/status
     POST /api/preview/source
     POST /api/preview/transform
     GET  /api/preview/image
     POST /api/display
     POST /api/clear
+    POST /api/rotation/toggle
+    POST /api/rotation/settings
+    POST /api/rotation/add
+    POST /api/rotation/display_now
+    POST /api/rotation/clear
 """
 
 import io
@@ -24,7 +30,9 @@ import re
 import socket
 import sys
 import threading
-from dataclasses import dataclass
+import time
+import uuid
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -48,6 +56,8 @@ MAX_IMAGE_PIXELS = 30_000_000
 FETCH_TIMEOUT_SECONDS = 30
 ALLOWED_ROTATIONS = {0, 90, 180, 270}
 ALLOWED_ORIENTATIONS = {"portrait", "landscape"}
+MIN_ROTATION_INTERVAL_SECONDS = 30
+MAX_ROTATION_INTERVAL_SECONDS = 24 * 60 * 60
 
 ALLOW_PRIVATE_URLS = os.environ.get("EPAPER_ALLOW_PRIVATE_URLS", "").lower() in (
     "1",
@@ -70,11 +80,38 @@ class PreviewState:
 
 
 _preview_lock = threading.Lock()
+_display_lock = threading.Lock()
 _preview_source = None
 _preview_state = PreviewState()
 _preview_display = None
 _preview_png = None
 _preview_version = 0
+
+
+@dataclass
+class RotationItem:
+    item_id: str
+    filename: str
+    created_at: float
+
+
+@dataclass
+class RotationState:
+    enabled: bool = False
+    interval_seconds: int = 15 * 60
+    next_index: int = 0
+    last_switch_ts: float = 0.0
+    items: list = field(default_factory=list)
+
+
+_rotation_lock = threading.Lock()
+_rotation_state = RotationState()
+_rotation_stop = threading.Event()
+_rotation_thread = None
+
+_ROTATION_STORE_DIR = os.path.join(_THIS_DIR, ".rotation_store")
+_ROTATION_ITEMS_DIR = os.path.join(_ROTATION_STORE_DIR, "items")
+_ROTATION_MANIFEST_PATH = os.path.join(_ROTATION_STORE_DIR, "manifest.json")
 
 
 def parse_content_length(raw_value):
@@ -130,6 +167,18 @@ def parse_font_size(value):
 def parse_orientation(value):
     s = str(value or "").strip().lower()
     return s if s in ALLOWED_ORIENTATIONS else "landscape"
+
+
+def parse_interval_seconds(value):
+    try:
+        interval = int(value or 0)
+    except (TypeError, ValueError):
+        interval = 0
+    if interval < MIN_ROTATION_INTERVAL_SECONDS:
+        interval = MIN_ROTATION_INTERVAL_SECONDS
+    if interval > MAX_ROTATION_INTERVAL_SECONDS:
+        interval = MAX_ROTATION_INTERVAL_SECONDS
+    return interval
 
 
 def is_truthy(value):
@@ -265,7 +314,8 @@ def show_image_on_epd(image):
 
 
 def clear_epd():
-    get_epd().Clear()
+    with _display_lock:
+        get_epd().Clear()
 
 
 def _text_size(draw, s, font):
@@ -273,42 +323,104 @@ def _text_size(draw, s, font):
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
-def render_text_to_image(text, font_size=72):
-    canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
-    max_w = EPD_WIDTH - 80
-
+def _load_text_font(font_size):
     try:
-        font = ImageFont.truetype(
+        return ImageFont.truetype(
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size
         )
     except (OSError, IOError):
         try:
-            font = ImageFont.truetype(
+            return ImageFont.truetype(
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
                 font_size,
             )
         except (OSError, IOError):
-            font = ImageFont.load_default()
+            return ImageFont.load_default()
 
-    line_height = font_size + font_size // 4
+
+def _wrap_text_lines(draw, text, font, max_w):
     lines = []
-    for para in (text or "").strip().split("\n"):
+    paragraphs = (text or "").strip().split("\n")
+    if not paragraphs:
+        return [""]
+
+    for pidx, para in enumerate(paragraphs):
         words = para.split()
+        if not words:
+            lines.append("")
+            continue
+
         current = []
         for word in words:
             trial = " ".join(current + [word]) if current else word
-            width, _ = _text_size(draw, trial, font)
-            if width > max_w and current:
+            trial_w, _ = _text_size(draw, trial, font)
+            if trial_w <= max_w or not current:
+                if trial_w <= max_w:
+                    current.append(word)
+                    continue
+
+                # Single long token: hard-wrap by characters.
+                chunk = ""
+                for ch in word:
+                    test = chunk + ch
+                    test_w, _ = _text_size(draw, test, font)
+                    if test_w > max_w and chunk:
+                        lines.append(chunk)
+                        chunk = ch
+                    else:
+                        chunk = test
+                if chunk:
+                    lines.append(chunk)
+                current = []
+            else:
                 lines.append(" ".join(current))
                 current = [word]
-            else:
-                current.append(word)
+
         if current:
             lines.append(" ".join(current))
 
-    if not lines:
-        lines = [""]
+        if pidx < len(paragraphs) - 1 and para.strip():
+            lines.append("")
+
+    return lines if lines else [""]
+
+
+def _fits_text(text, font_size, max_w, max_h):
+    scratch = Image.new("RGB", (8, 8), (255, 255, 255))
+    draw = ImageDraw.Draw(scratch)
+    font = _load_text_font(font_size)
+    lines = _wrap_text_lines(draw, text, font, max_w)
+    ascent, descent = font.getmetrics()
+    line_height = max(1, ascent + descent + max(2, int(font_size * 0.15)))
+    total_h = len(lines) * line_height
+    return total_h <= max_h, lines, font, line_height
+
+
+def render_text_to_image(text, font_size=72):
+    canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    max_w = EPD_WIDTH - 80
+    max_h = EPD_HEIGHT - 80
+
+    # Choose the largest font size that fits the whole panel.
+    lo = 12
+    hi = max(12, min(420, int(font_size) * 5))
+    best_size = lo
+    best_layout = None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        fits, lines, font, line_height = _fits_text(text, mid, max_w, max_h)
+        if fits:
+            best_size = mid
+            best_layout = (lines, font, line_height)
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    if best_layout is None:
+        _, lines, font, line_height = _fits_text(text, 12, max_w, max_h)
+    else:
+        lines, font, line_height = best_layout
 
     total_h = len(lines) * line_height
     y = (EPD_HEIGHT - total_h) // 2
@@ -454,7 +566,225 @@ def display_preview_buffer():
     if orientation == "landscape":
         # Match panel output to the landscape preview orientation.
         image = image.rotate(180, expand=False)
-    show_image_on_epd(image)
+    with _display_lock:
+        show_image_on_epd(image)
+
+
+def _ensure_rotation_dirs():
+    os.makedirs(_ROTATION_ITEMS_DIR, exist_ok=True)
+
+
+def _rotation_manifest_dict_locked():
+    return {
+        "enabled": bool(_rotation_state.enabled),
+        "interval_seconds": int(_rotation_state.interval_seconds),
+        "next_index": int(_rotation_state.next_index),
+        "last_switch_ts": float(_rotation_state.last_switch_ts),
+        "items": [
+            {
+                "item_id": item.item_id,
+                "filename": item.filename,
+                "created_at": float(item.created_at),
+            }
+            for item in _rotation_state.items
+        ],
+    }
+
+
+def _persist_rotation_locked():
+    _ensure_rotation_dirs()
+    payload = _rotation_manifest_dict_locked()
+    tmp_path = _ROTATION_MANIFEST_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+    os.replace(tmp_path, _ROTATION_MANIFEST_PATH)
+
+
+def _normalize_rotation_state_locked():
+    if _rotation_state.interval_seconds < MIN_ROTATION_INTERVAL_SECONDS:
+        _rotation_state.interval_seconds = MIN_ROTATION_INTERVAL_SECONDS
+    if _rotation_state.interval_seconds > MAX_ROTATION_INTERVAL_SECONDS:
+        _rotation_state.interval_seconds = MAX_ROTATION_INTERVAL_SECONDS
+
+    valid_items = []
+    for item in _rotation_state.items:
+        path = os.path.join(_ROTATION_ITEMS_DIR, item.filename)
+        if os.path.exists(path):
+            valid_items.append(item)
+    _rotation_state.items = valid_items
+    if not _rotation_state.items:
+        _rotation_state.next_index = 0
+    else:
+        _rotation_state.next_index = _rotation_state.next_index % len(_rotation_state.items)
+
+
+def load_rotation_state():
+    _ensure_rotation_dirs()
+    with _rotation_lock:
+        if not os.path.exists(_ROTATION_MANIFEST_PATH):
+            _persist_rotation_locked()
+            return
+
+        try:
+            with open(_ROTATION_MANIFEST_PATH, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+
+        items = []
+        for entry in payload.get("items", []):
+            item_id = str(entry.get("item_id") or "").strip() or uuid.uuid4().hex
+            filename = str(entry.get("filename") or "").strip()
+            if not filename:
+                continue
+            created_at = float(entry.get("created_at") or 0.0)
+            items.append(RotationItem(item_id=item_id, filename=filename, created_at=created_at))
+
+        _rotation_state.enabled = bool(payload.get("enabled", False))
+        _rotation_state.interval_seconds = parse_interval_seconds(payload.get("interval_seconds"))
+        _rotation_state.next_index = int(payload.get("next_index") or 0)
+        _rotation_state.last_switch_ts = float(payload.get("last_switch_ts") or 0.0)
+        _rotation_state.items = items
+        _normalize_rotation_state_locked()
+        _persist_rotation_locked()
+
+
+def get_rotation_status():
+    with _rotation_lock:
+        count = len(_rotation_state.items)
+        now = time.time()
+        next_in_seconds = None
+        if _rotation_state.enabled and count > 0:
+            if _rotation_state.last_switch_ts <= 0:
+                next_in_seconds = 0
+            else:
+                remaining = _rotation_state.interval_seconds - (now - _rotation_state.last_switch_ts)
+                next_in_seconds = max(0, int(remaining))
+        return {
+            "enabled": bool(_rotation_state.enabled),
+            "interval_seconds": int(_rotation_state.interval_seconds),
+            "item_count": count,
+            "next_index": int(_rotation_state.next_index),
+            "last_switch_ts": float(_rotation_state.last_switch_ts),
+            "next_in_seconds": next_in_seconds,
+        }
+
+
+def set_rotation_enabled(enabled):
+    with _rotation_lock:
+        _rotation_state.enabled = bool(enabled)
+        if _rotation_state.enabled:
+            # Display promptly when turning on.
+            _rotation_state.last_switch_ts = 0.0
+        _persist_rotation_locked()
+    return get_rotation_status()
+
+
+def set_rotation_interval(interval_seconds):
+    with _rotation_lock:
+        _rotation_state.interval_seconds = parse_interval_seconds(interval_seconds)
+        _persist_rotation_locked()
+    return get_rotation_status()
+
+
+def clear_rotation_items():
+    with _rotation_lock:
+        for item in _rotation_state.items:
+            path = os.path.join(_ROTATION_ITEMS_DIR, item.filename)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        _rotation_state.items = []
+        _rotation_state.next_index = 0
+        _rotation_state.last_switch_ts = 0.0
+        _persist_rotation_locked()
+    return get_rotation_status()
+
+
+def add_preview_to_rotation():
+    with _preview_lock:
+        if _preview_display is None:
+            raise ValueError("No preview image available")
+        image = _preview_display.copy()
+
+    _ensure_rotation_dirs()
+    item_id = uuid.uuid4().hex
+    filename = f"{item_id}.png"
+    path = os.path.join(_ROTATION_ITEMS_DIR, filename)
+    image.save(path, format="PNG")
+
+    with _rotation_lock:
+        _rotation_state.items.append(
+            RotationItem(item_id=item_id, filename=filename, created_at=time.time())
+        )
+        if len(_rotation_state.items) == 1:
+            _rotation_state.next_index = 0
+        _persist_rotation_locked()
+        count = len(_rotation_state.items)
+
+    return {"item_id": item_id, "item_count": count}
+
+
+def display_now(also_add=False):
+    added = None
+    if also_add:
+        added = add_preview_to_rotation()
+    display_preview_buffer()
+    return {"added": added}
+
+
+def _load_rotation_item_image(item):
+    path = os.path.join(_ROTATION_ITEMS_DIR, item.filename)
+    with open(path, "rb") as f:
+        data = f.read()
+    return load_image_from_bytes(data)
+
+
+def _rotation_worker():
+    while not _rotation_stop.wait(1.0):
+        selected = None
+        with _rotation_lock:
+            if _rotation_state.enabled and _rotation_state.items:
+                now = time.time()
+                due = (
+                    _rotation_state.last_switch_ts <= 0
+                    or (now - _rotation_state.last_switch_ts) >= _rotation_state.interval_seconds
+                )
+                if due:
+                    _rotation_state.next_index %= len(_rotation_state.items)
+                    selected = _rotation_state.items[_rotation_state.next_index]
+                    _rotation_state.next_index = (_rotation_state.next_index + 1) % len(
+                        _rotation_state.items
+                    )
+                    _rotation_state.last_switch_ts = now
+                    _persist_rotation_locked()
+
+        if not selected:
+            continue
+
+        try:
+            image = _load_rotation_item_image(selected)
+            with _display_lock:
+                show_image_on_epd(image)
+            print(
+                f"[rotation] displayed item={selected.item_id} next_index={get_rotation_status()['next_index']}"
+            )
+        except Exception as e:
+            print(f"[rotation] failed to display item={selected.item_id}: {e}")
+
+
+def start_rotation_worker():
+    global _rotation_thread
+    if _rotation_thread and _rotation_thread.is_alive():
+        return
+    _rotation_stop.clear()
+    _rotation_thread = threading.Thread(target=_rotation_worker, name="rotation-worker", daemon=True)
+    _rotation_thread.start()
+
+
+def stop_rotation_worker():
+    _rotation_stop.set()
 
 
 API_DOCS_HTML = """<!DOCTYPE html>
@@ -477,6 +807,9 @@ API_DOCS_HTML = """<!DOCTYPE html>
   <h2>GET /api/status</h2>
   <pre>curl http://localhost:5000/api/status</pre>
 
+  <h2>GET /api/rotation/status</h2>
+  <pre>curl http://localhost:5000/api/rotation/status</pre>
+
   <h2>POST /api/preview/source</h2>
   <p>Set source image from one of:</p>
   <ul>
@@ -497,6 +830,21 @@ API_DOCS_HTML = """<!DOCTYPE html>
 
   <h2>POST /api/clear</h2>
   <p>Clear the e-paper display.</p>
+
+  <h2>POST /api/rotation/toggle</h2>
+  <pre>{"enabled": true}</pre>
+
+  <h2>POST /api/rotation/settings</h2>
+  <pre>{"interval_seconds": 900}</pre>
+
+  <h2>POST /api/rotation/add</h2>
+  <p>Add current preview buffer to rotation playlist.</p>
+
+  <h2>POST /api/rotation/display_now</h2>
+  <pre>{"also_add": true}</pre>
+
+  <h2>POST /api/rotation/clear</h2>
+  <p>Clear all queued rotation items.</p>
 
   <p><a href="/">Back to UI</a></p>
 </body>
@@ -636,6 +984,21 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
 
         <div class="status" id="status">Ready.</div>
+
+        <h2>Rotation Mode</h2>
+        <div class="row">
+          <button id="rotationToggleBtn" class="btn-secondary">Rotation: Off</button>
+          <span id="rotationMeta" class="tag">0 items queued</span>
+        </div>
+        <div class="row">
+          <label for="rotationInterval" style="min-width: 120px;">Interval (seconds)</label>
+          <input id="rotationInterval" type="number" min="30" max="86400" value="900" style="width: 120px;" />
+          <button id="saveRotationIntervalBtn" class="btn-secondary">Save Interval</button>
+        </div>
+        <div class="row">
+          <button id="addRotationBtn" class="btn-secondary">Add Preview To Rotation</button>
+          <button id="clearRotationBtn" class="btn-secondary">Clear Rotation Queue</button>
+        </div>
       </section>
 
       <section class="card stack">
@@ -666,10 +1029,16 @@ HTML_PAGE = """<!DOCTYPE html>
           <div id="previewEmpty">No preview loaded yet.</div>
         </div>
 
-        <p class="small">Preview buffer is server-side. "Push To Display" sends exactly this buffered preview to the panel.</p>
+        <p class="small">Preview buffer is server-side. "Display Now" sends exactly this buffered preview to the panel.</p>
 
         <div class="row">
-          <button id="pushBtn" class="btn-ok">Push Preview To Display</button>
+          <label class="small" style="display:inline-flex;align-items:center;gap:6px;">
+            <input id="alsoAddNow" type="checkbox" />
+            Also add to rotation when displaying now
+          </label>
+        </div>
+        <div class="row">
+          <button id="pushBtn" class="btn-ok">Display Now</button>
           <button id="clearBtn" class="btn-danger">Clear Display</button>
           <a href="/api/docs" class="small">API docs</a>
         </div>
@@ -683,6 +1052,9 @@ HTML_PAGE = """<!DOCTYPE html>
       crop: 1,
       fill: false,
       orientation: "landscape",
+      rotationEnabled: false,
+      rotationInterval: 900,
+      rotationItemCount: 0,
       hasPreview: false,
       busy: false,
     };
@@ -702,6 +1074,10 @@ HTML_PAGE = """<!DOCTYPE html>
       fillToggle: document.getElementById("fillToggleBtn"),
       oriPortrait: document.getElementById("oriPortraitBtn"),
       oriLandscape: document.getElementById("oriLandscapeBtn"),
+      rotationToggle: document.getElementById("rotationToggleBtn"),
+      rotationMeta: document.getElementById("rotationMeta"),
+      rotationInterval: document.getElementById("rotationInterval"),
+      alsoAddNow: document.getElementById("alsoAddNow"),
       buttons: Array.from(document.querySelectorAll("button")),
     };
 
@@ -832,6 +1208,19 @@ HTML_PAGE = """<!DOCTYPE html>
         el.oriPortrait.className = "btn-secondary";
         el.oriLandscape.className = "btn-primary";
       }
+
+      el.rotationToggle.textContent = `Rotation: ${state.rotationEnabled ? "On" : "Off"}`;
+      el.rotationToggle.className = state.rotationEnabled ? "btn-primary" : "btn-secondary";
+      el.rotationMeta.textContent = `${state.rotationItemCount} items queued`;
+      el.rotationInterval.value = String(state.rotationInterval);
+    }
+
+    function applyRotationStatus(rotation) {
+      if (!rotation) return;
+      state.rotationEnabled = !!rotation.enabled;
+      state.rotationInterval = Number(rotation.interval_seconds) || 900;
+      state.rotationItemCount = Number(rotation.item_count) || 0;
+      syncUiFromState();
     }
 
     function setPreviewImage(url) {
@@ -849,6 +1238,15 @@ HTML_PAGE = """<!DOCTYPE html>
       state.orientation = payload.state.orientation;
       syncUiFromState();
       setPreviewImage(payload.state.preview_url + `&cb=${Date.now()}`);
+    }
+
+    async function refreshRotationStatus() {
+      try {
+        const payload = await requestJSON("/api/rotation/status", { method: "GET" });
+        applyRotationStatus(payload.rotation);
+      } catch (err) {
+        setStatus(err.message || "Failed to load rotation status.", "err");
+      }
     }
 
     async function loadFileSource() {
@@ -971,12 +1369,101 @@ HTML_PAGE = """<!DOCTYPE html>
       }
 
       setBusy(true);
-      setStatus("Pushing preview buffer to e-paper display (~19s)...");
+      setStatus("Displaying on e-paper (~19s)...");
       try {
-        await requestJSON("/api/display", { method: "POST" }, { timeoutMs: 90000, retries: 0 });
-        setStatus("Display update started.", "ok");
+        const payload = await requestJSON(
+          "/api/rotation/display_now",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ also_add: !!el.alsoAddNow.checked }),
+          },
+          { timeoutMs: 90000, retries: 0 }
+        );
+        applyRotationStatus(payload.rotation);
+        if (el.alsoAddNow.checked) {
+          setStatus("Display update started and preview added to rotation.", "ok");
+        } else {
+          setStatus("Display update started.", "ok");
+        }
       } catch (err) {
-        setStatus(err.message || "Failed to push preview to display.", "err");
+        setStatus(err.message || "Failed to display preview.", "err");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function addPreviewToRotation() {
+      if (!state.hasPreview) {
+        setStatus("Load a source first.", "err");
+        return;
+      }
+      setBusy(true);
+      setStatus("Adding preview to rotation...");
+      try {
+        const payload = await requestJSON(
+          "/api/rotation/add",
+          { method: "POST" },
+          { timeoutMs: 90000, retries: 0 }
+        );
+        applyRotationStatus(payload.rotation);
+        setStatus("Preview added to rotation queue.", "ok");
+      } catch (err) {
+        setStatus(err.message || "Failed to add preview to rotation.", "err");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function toggleRotationMode() {
+      setBusy(true);
+      setStatus("Updating rotation mode...");
+      try {
+        const payload = await requestJSON("/api/rotation/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !state.rotationEnabled }),
+        });
+        applyRotationStatus(payload.rotation);
+        setStatus(
+          payload.rotation.enabled ? "Rotation mode enabled." : "Rotation mode disabled.",
+          "ok"
+        );
+      } catch (err) {
+        setStatus(err.message || "Failed to toggle rotation mode.", "err");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function saveRotationInterval() {
+      const intervalSeconds = Math.max(30, Math.min(86400, Number(el.rotationInterval.value) || 900));
+      setBusy(true);
+      setStatus("Saving rotation interval...");
+      try {
+        const payload = await requestJSON("/api/rotation/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ interval_seconds: intervalSeconds }),
+        });
+        applyRotationStatus(payload.rotation);
+        setStatus(`Rotation interval set to ${payload.rotation.interval_seconds}s.`, "ok");
+      } catch (err) {
+        setStatus(err.message || "Failed to save interval.", "err");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function clearRotationQueue() {
+      setBusy(true);
+      setStatus("Clearing rotation queue...");
+      try {
+        const payload = await requestJSON("/api/rotation/clear", { method: "POST" });
+        applyRotationStatus(payload.rotation);
+        setStatus("Rotation queue cleared.", "ok");
+      } catch (err) {
+        setStatus(err.message || "Failed to clear rotation queue.", "err");
       } finally {
         setBusy(false);
       }
@@ -1034,9 +1521,14 @@ HTML_PAGE = """<!DOCTYPE html>
     });
 
     document.getElementById("pushBtn").addEventListener("click", pushPreviewToDisplay);
+    document.getElementById("addRotationBtn").addEventListener("click", addPreviewToRotation);
+    document.getElementById("rotationToggleBtn").addEventListener("click", toggleRotationMode);
+    document.getElementById("saveRotationIntervalBtn").addEventListener("click", saveRotationInterval);
+    document.getElementById("clearRotationBtn").addEventListener("click", clearRotationQueue);
     document.getElementById("clearBtn").addEventListener("click", clearDisplay);
 
     syncUiFromState();
+    refreshRotationStatus();
   </script>
 </body>
 </html>
@@ -1099,8 +1591,13 @@ class Handler(BaseHTTPRequestHandler):
                     },
                     "allow_private_urls": ALLOW_PRIVATE_URLS,
                     "has_preview": get_preview_png() is not None,
+                    "rotation": get_rotation_status(),
                 },
             )
+            return
+
+        if path == "/api/rotation/status":
+            self._send_json(200, {"ok": True, "rotation": get_rotation_status()})
             return
 
         if path == "/api/preview/image":
@@ -1133,6 +1630,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/clear":
                 self._api_clear()
+                return
+            if path == "/api/rotation/toggle":
+                self._api_rotation_toggle()
+                return
+            if path == "/api/rotation/settings":
+                self._api_rotation_settings()
+                return
+            if path == "/api/rotation/add":
+                self._api_rotation_add()
+                return
+            if path == "/api/rotation/display_now":
+                self._api_rotation_display_now()
+                return
+            if path == "/api/rotation/clear":
+                self._api_rotation_clear()
                 return
         except ValueError as e:
             self._send_json(400, {"ok": False, "error": str(e)})
@@ -1207,18 +1719,64 @@ class Handler(BaseHTTPRequestHandler):
         clear_epd()
         self._send_json(200, {"ok": True, "message": "Screen cleared"})
 
+    def _api_rotation_toggle(self):
+        payload = self._read_json()
+        enabled = payload.get("enabled")
+        if enabled is None:
+            raise ValueError("Missing enabled")
+        enabled = enabled if isinstance(enabled, bool) else is_truthy(enabled)
+        status = set_rotation_enabled(enabled)
+        self._send_json(200, {"ok": True, "rotation": status})
+
+    def _api_rotation_settings(self):
+        payload = self._read_json()
+        if "interval_seconds" not in payload:
+            raise ValueError("Missing interval_seconds")
+        status = set_rotation_interval(payload.get("interval_seconds"))
+        self._send_json(200, {"ok": True, "rotation": status})
+
+    def _api_rotation_add(self):
+        added = add_preview_to_rotation()
+        self._send_json(200, {"ok": True, "added": added, "rotation": get_rotation_status()})
+
+    def _api_rotation_display_now(self):
+        payload = self._read_json()
+        also_add = payload.get("also_add", False)
+        also_add = also_add if isinstance(also_add, bool) else is_truthy(also_add)
+        result = display_now(also_add=also_add)
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "message": "Display updating (~19s)",
+                "result": result,
+                "rotation": get_rotation_status(),
+            },
+        )
+
+    def _api_rotation_clear(self):
+        status = clear_rotation_items()
+        self._send_json(200, {"ok": True, "rotation": status})
+
 
 def run_server():
     port = 5000
+    load_rotation_state()
+    start_rotation_worker()
     server = HTTPServer(("0.0.0.0", port), Handler)
     print("e-Paper photo server: http://localhost:%s" % port)
     print("  UI: source -> preview buffer -> display")
-    print("  API: /api/preview/source, /api/preview/transform, /api/preview/image, /api/display, /api/clear")
+    print(
+        "  API: /api/status, /api/preview/source, /api/preview/transform, /api/preview/image, /api/display, /api/clear, /api/rotation/*"
+    )
     print("  From another device: http://<pi-ip>:%s" % port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopped.")
+    finally:
+        stop_rotation_worker()
+        server.server_close()
         sys.exit(0)
 
 
