@@ -10,6 +10,7 @@ Run from repo root. No extra installs; uses same deps as the demo.
   API (when server is running):
     GET  /api/status
     GET  /api/rotation/status
+    GET  /api/rotation/item_image?id=<item_id>
     POST /api/preview/source
     POST /api/preview/transform
     GET  /api/preview/image
@@ -19,6 +20,7 @@ Run from repo root. No extra installs; uses same deps as the demo.
     POST /api/rotation/settings
     POST /api/rotation/add
     POST /api/rotation/display_now
+    POST /api/rotation/remove
     POST /api/rotation/clear
 """
 
@@ -660,6 +662,16 @@ def get_rotation_status():
             else:
                 remaining = _rotation_state.interval_seconds - (now - _rotation_state.last_switch_ts)
                 next_in_seconds = max(0, int(remaining))
+        items = []
+        for idx, item in enumerate(_rotation_state.items):
+            items.append(
+                {
+                    "item_id": item.item_id,
+                    "created_at": float(item.created_at),
+                    "preview_url": f"/api/rotation/item_image?id={item.item_id}",
+                    "is_next": idx == int(_rotation_state.next_index),
+                }
+            )
         return {
             "enabled": bool(_rotation_state.enabled),
             "interval_seconds": int(_rotation_state.interval_seconds),
@@ -667,6 +679,7 @@ def get_rotation_status():
             "next_index": int(_rotation_state.next_index),
             "last_switch_ts": float(_rotation_state.last_switch_ts),
             "next_in_seconds": next_in_seconds,
+            "items": items,
         }
 
 
@@ -699,6 +712,44 @@ def clear_rotation_items():
         _rotation_state.next_index = 0
         _rotation_state.last_switch_ts = 0.0
         _persist_rotation_locked()
+    return get_rotation_status()
+
+
+def remove_rotation_item(item_id):
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        raise ValueError("Missing item_id")
+
+    with _rotation_lock:
+        idx = -1
+        target = None
+        for i, item in enumerate(_rotation_state.items):
+            if item.item_id == item_id:
+                idx = i
+                target = item
+                break
+
+        if target is None:
+            raise ValueError("Rotation item not found")
+
+        path = os.path.join(_ROTATION_ITEMS_DIR, target.filename)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+        del _rotation_state.items[idx]
+        if not _rotation_state.items:
+            _rotation_state.next_index = 0
+            _rotation_state.last_switch_ts = 0.0
+        else:
+            if idx < _rotation_state.next_index:
+                _rotation_state.next_index -= 1
+            if _rotation_state.next_index >= len(_rotation_state.items):
+                _rotation_state.next_index = 0
+
+        _persist_rotation_locked()
+
     return get_rotation_status()
 
 
@@ -739,6 +790,30 @@ def _load_rotation_item_image(item):
     with open(path, "rb") as f:
         data = f.read()
     return load_image_from_bytes(data)
+
+
+def get_rotation_item_png(item_id):
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        raise ValueError("Missing item_id")
+
+    with _rotation_lock:
+        target = None
+        for item in _rotation_state.items:
+            if item.item_id == item_id:
+                target = item
+                break
+        if target is None:
+            raise ValueError("Rotation item not found")
+        path = os.path.join(_ROTATION_ITEMS_DIR, target.filename)
+
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        raise ValueError("Rotation item image is missing") from e
+
+    return data
 
 
 def _rotation_worker():
@@ -802,13 +877,16 @@ API_DOCS_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <h1>e-Paper Photo API</h1>
-  <p>All responses are JSON except <code>GET /api/preview/image</code>.</p>
+  <p>All responses are JSON except <code>GET /api/preview/image</code> and <code>GET /api/rotation/item_image</code>.</p>
 
   <h2>GET /api/status</h2>
   <pre>curl http://localhost:5000/api/status</pre>
 
   <h2>GET /api/rotation/status</h2>
   <pre>curl http://localhost:5000/api/rotation/status</pre>
+
+  <h2>GET /api/rotation/item_image?id=&lt;item_id&gt;</h2>
+  <p>Returns PNG bytes for a queued rotation item image.</p>
 
   <h2>POST /api/preview/source</h2>
   <p>Set source image from one of:</p>
@@ -842,6 +920,9 @@ API_DOCS_HTML = """<!DOCTYPE html>
 
   <h2>POST /api/rotation/display_now</h2>
   <pre>{"also_add": true}</pre>
+
+  <h2>POST /api/rotation/remove</h2>
+  <pre>{"item_id":"abc123..."}</pre>
 
   <h2>POST /api/rotation/clear</h2>
   <p>Clear all queued rotation items.</p>
@@ -953,6 +1034,27 @@ HTML_PAGE = """<!DOCTYPE html>
     .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .wide { grid-column: 1 / -1; }
     .small { color: var(--muted); font-size: 0.9rem; }
+    .rotation-queue { display: grid; gap: 8px; margin-top: 8px; }
+    .queue-item {
+      display: grid;
+      grid-template-columns: 88px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 7px;
+      background: #fff;
+    }
+    .queue-thumb {
+      width: 88px;
+      height: 66px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #f3f6fc;
+    }
+    .queue-meta { font-size: 0.86rem; color: var(--muted); }
+    .queue-delete { padding: 8px 9px; font-size: 0.82rem; }
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
     }
@@ -999,6 +1101,7 @@ HTML_PAGE = """<!DOCTYPE html>
           <button id="addRotationBtn" class="btn-secondary">Add Preview To Rotation</button>
           <button id="clearRotationBtn" class="btn-secondary">Clear Rotation Queue</button>
         </div>
+        <div id="rotationQueueList" class="rotation-queue"></div>
       </section>
 
       <section class="card stack">
@@ -1055,6 +1158,8 @@ HTML_PAGE = """<!DOCTYPE html>
       rotationEnabled: false,
       rotationInterval: 900,
       rotationItemCount: 0,
+      rotationItems: [],
+      rotationNextIndex: 0,
       hasPreview: false,
       busy: false,
     };
@@ -1077,13 +1182,13 @@ HTML_PAGE = """<!DOCTYPE html>
       rotationToggle: document.getElementById("rotationToggleBtn"),
       rotationMeta: document.getElementById("rotationMeta"),
       rotationInterval: document.getElementById("rotationInterval"),
+      rotationQueueList: document.getElementById("rotationQueueList"),
       alsoAddNow: document.getElementById("alsoAddNow"),
-      buttons: Array.from(document.querySelectorAll("button")),
     };
 
     function setBusy(busy) {
       state.busy = busy;
-      for (const button of el.buttons) button.disabled = busy;
+      for (const button of document.querySelectorAll("button")) button.disabled = busy;
     }
 
     function setStatus(message, kind = "") {
@@ -1211,8 +1316,50 @@ HTML_PAGE = """<!DOCTYPE html>
 
       el.rotationToggle.textContent = `Rotation: ${state.rotationEnabled ? "On" : "Off"}`;
       el.rotationToggle.className = state.rotationEnabled ? "btn-primary" : "btn-secondary";
-      el.rotationMeta.textContent = `${state.rotationItemCount} items queued`;
+      const nextText = state.rotationItemCount > 0 ? `, next #${state.rotationNextIndex + 1}` : "";
+      el.rotationMeta.textContent = `${state.rotationItemCount} items queued${nextText}`;
       el.rotationInterval.value = String(state.rotationInterval);
+    }
+
+    function renderRotationQueue() {
+      const host = el.rotationQueueList;
+      if (!host) return;
+      host.innerHTML = "";
+
+      if (!state.rotationItems || state.rotationItems.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "small";
+        empty.textContent = "Queue is empty.";
+        host.appendChild(empty);
+        return;
+      }
+
+      for (let idx = 0; idx < state.rotationItems.length; idx += 1) {
+        const item = state.rotationItems[idx];
+        const card = document.createElement("div");
+        card.className = "queue-item";
+
+        const img = document.createElement("img");
+        img.className = "queue-thumb";
+        img.alt = `Queue ${idx + 1}`;
+        img.src = `${item.preview_url}&cb=${Date.now()}`;
+        card.appendChild(img);
+
+        const meta = document.createElement("div");
+        meta.className = "queue-meta";
+        const when = item.created_at ? new Date(item.created_at * 1000).toLocaleString() : "unknown";
+        meta.textContent = `#${idx + 1}${item.is_next ? " (next)" : ""} - added ${when}`;
+        card.appendChild(meta);
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "btn-danger queue-delete";
+        del.dataset.itemId = item.item_id;
+        del.textContent = "Delete";
+        card.appendChild(del);
+
+        host.appendChild(card);
+      }
     }
 
     function applyRotationStatus(rotation) {
@@ -1220,7 +1367,10 @@ HTML_PAGE = """<!DOCTYPE html>
       state.rotationEnabled = !!rotation.enabled;
       state.rotationInterval = Number(rotation.interval_seconds) || 900;
       state.rotationItemCount = Number(rotation.item_count) || 0;
+      state.rotationNextIndex = Number(rotation.next_index) || 0;
+      state.rotationItems = Array.isArray(rotation.items) ? rotation.items : [];
       syncUiFromState();
+      renderRotationQueue();
     }
 
     function setPreviewImage(url) {
@@ -1469,6 +1619,25 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
+    async function removeRotationQueueItem(itemId) {
+      if (!itemId) return;
+      setBusy(true);
+      setStatus("Removing queue item...");
+      try {
+        const payload = await requestJSON("/api/rotation/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item_id: itemId }),
+        });
+        applyRotationStatus(payload.rotation);
+        setStatus("Queue item removed.", "ok");
+      } catch (err) {
+        setStatus(err.message || "Failed to remove queue item.", "err");
+      } finally {
+        setBusy(false);
+      }
+    }
+
     async function clearDisplay() {
       setBusy(true);
       setStatus("Clearing display...");
@@ -1525,6 +1694,11 @@ HTML_PAGE = """<!DOCTYPE html>
     document.getElementById("rotationToggleBtn").addEventListener("click", toggleRotationMode);
     document.getElementById("saveRotationIntervalBtn").addEventListener("click", saveRotationInterval);
     document.getElementById("clearRotationBtn").addEventListener("click", clearRotationQueue);
+    document.getElementById("rotationQueueList").addEventListener("click", (event) => {
+      const btn = event.target.closest("button[data-item-id]");
+      if (!btn) return;
+      removeRotationQueueItem(btn.dataset.itemId);
+    });
     document.getElementById("clearBtn").addEventListener("click", clearDisplay);
 
     syncUiFromState();
@@ -1600,6 +1774,22 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "rotation": get_rotation_status()})
             return
 
+        if path == "/api/rotation/item_image":
+            qs = parse_qs(urlparse(self.path).query)
+            item_id = (qs.get("id") or [""])[0]
+            try:
+                png = get_rotation_item_png(item_id)
+            except ValueError as e:
+                self.send_error(404, str(e))
+                return
+            self.send_response(200)
+            self.send_header("Content-type", "image/png")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-length", str(len(png)))
+            self.end_headers()
+            self.wfile.write(png)
+            return
+
         if path == "/api/preview/image":
             png = get_preview_png()
             if not png:
@@ -1642,6 +1832,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/rotation/display_now":
                 self._api_rotation_display_now()
+                return
+            if path == "/api/rotation/remove":
+                self._api_rotation_remove()
                 return
             if path == "/api/rotation/clear":
                 self._api_rotation_clear()
@@ -1753,6 +1946,12 @@ class Handler(BaseHTTPRequestHandler):
                 "rotation": get_rotation_status(),
             },
         )
+
+    def _api_rotation_remove(self):
+        payload = self._read_json()
+        item_id = payload.get("item_id")
+        status = remove_rotation_item(item_id)
+        self._send_json(200, {"ok": True, "rotation": status})
 
     def _api_rotation_clear(self):
         status = clear_rotation_items()

@@ -21,6 +21,7 @@ curl http://localhost:5000/api/status
 
 - **Static mode**: Load a source into preview, then click **Display Now**.
 - **Rotation mode**: Add one or more preview snapshots to the queue, set interval seconds, and toggle rotation on/off at any time.
+- Rotation queue shows mini previews for each queued item, and each item can be removed individually.
 - **Display Now + Also add**: Enable the checkbox to both show immediately and append the same preview to the rotation queue.
 - Rotation queue and settings persist on disk under `.rotation_store/` and are restored after restart.
 
@@ -82,10 +83,18 @@ curl -X POST http://localhost:5000/api/rotation/settings \
 # Add current preview to rotation queue
 curl -X POST http://localhost:5000/api/rotation/add
 
+# Remove one queued item by ID
+curl -X POST http://localhost:5000/api/rotation/remove \
+  -H 'Content-Type: application/json' \
+  -d '{"item_id":"abc123..."}'
+
 # Display now and optionally add to queue
 curl -X POST http://localhost:5000/api/rotation/display_now \
   -H 'Content-Type: application/json' \
   -d '{"also_add":true}'
+
+# Fetch queued item preview image
+curl "http://localhost:5000/api/rotation/item_image?id=abc123..." --output queue-item.png
 ```
 
 ## Reliability defaults
