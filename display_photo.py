@@ -993,29 +993,40 @@ HTML_PAGE = """<!DOCTYPE html>
       color: var(--ink);
       background: radial-gradient(circle at top right, #e8f1ff, var(--bg) 55%);
     }
-    .wrap { max-width: 1020px; margin: 0 auto; padding: 24px; }
+    .wrap { width: min(96vw, 1580px); margin: 0 auto; padding: 14px 18px 20px; }
     h1 { margin: 0 0 6px; font-size: 1.9rem; }
-    .sub { margin: 0 0 18px; color: var(--muted); }
-    .grid { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+    .sub { margin: 0 0 12px; color: var(--muted); }
+    .grid { display: grid; gap: 16px; grid-template-columns: minmax(360px, 430px) minmax(0, 1fr); align-items: start; }
     .card {
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 14px;
-      padding: 16px;
+      padding: 13px;
       box-shadow: var(--shadow);
     }
     .card h2 { margin: 0 0 10px; font-size: 1.05rem; }
-    .stack { display: grid; gap: 10px; }
+    .stack { display: grid; gap: 8px; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .control-panel {
+      position: sticky;
+      top: 10px;
+      max-height: calc(100vh - 20px);
+      overflow: auto;
+      align-content: start;
+    }
+    .preview-panel {
+      min-height: calc(100vh - 34px);
+      align-content: start;
+    }
     input[type="file"], input[type="url"], input[type="number"], textarea {
       width: 100%;
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 10px 11px;
+      padding: 9px 10px;
       font: inherit;
       background: #fff;
     }
-    textarea { min-height: 88px; resize: vertical; }
+    textarea { min-height: 74px; resize: vertical; }
     button {
       border: 1px solid transparent;
       border-radius: 10px;
@@ -1045,12 +1056,13 @@ HTML_PAGE = """<!DOCTYPE html>
       border: 1px dashed var(--border);
       border-radius: 12px;
       background: linear-gradient(135deg, #f7faff, #eef4ff);
-      min-height: 280px;
+      min-height: 460px;
+      height: clamp(460px, 62vh, 820px);
       display: grid;
       place-items: center;
       padding: 10px;
     }
-    #previewImage { max-width: 100%; max-height: 68vh; border-radius: 10px; box-shadow: 0 8px 20px rgba(16, 35, 61, 0.18); }
+    #previewImage { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: 0 8px 20px rgba(16, 35, 61, 0.18); }
     #previewEmpty { color: var(--muted); text-align: center; }
     .status {
       margin-top: 12px;
@@ -1068,10 +1080,10 @@ HTML_PAGE = """<!DOCTYPE html>
     .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .wide { grid-column: 1 / -1; }
     .small { color: var(--muted); font-size: 0.9rem; }
-    .rotation-queue { display: grid; gap: 8px; margin-top: 8px; }
+    .rotation-queue { display: grid; gap: 8px; margin-top: 4px; max-height: 34vh; overflow: auto; padding-right: 2px; }
     .queue-item {
       display: grid;
-      grid-template-columns: 88px 1fr auto;
+      grid-template-columns: 88px 1fr auto auto;
       gap: 8px;
       align-items: center;
       border: 1px solid var(--border);
@@ -1089,8 +1101,18 @@ HTML_PAGE = """<!DOCTYPE html>
     }
     .queue-meta { font-size: 0.86rem; color: var(--muted); }
     .queue-delete { padding: 8px 9px; font-size: 0.82rem; }
+    @media (max-width: 1120px) {
+      .grid { grid-template-columns: 1fr; }
+      .control-panel { position: static; max-height: none; overflow: visible; }
+      .preview-panel { min-height: unset; }
+      .preview-box { min-height: 340px; height: min(62vh, 620px); }
+      .rotation-queue { max-height: 26vh; }
+    }
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
+      .preview-box { min-height: 300px; height: min(58vh, 540px); }
+      .queue-item { grid-template-columns: 74px 1fr auto auto; }
+      .queue-thumb { width: 74px; height: 56px; }
     }
   </style>
 </head>
@@ -1100,7 +1122,7 @@ HTML_PAGE = """<!DOCTYPE html>
     <p class="sub">Load an image, URL, or text into a preview buffer, tune it, then push to the display.</p>
 
     <div class="grid">
-      <section class="card stack">
+      <section class="card stack control-panel">
         <h2>1) Choose Source</h2>
 
         <label>Upload file</label>
@@ -1138,7 +1160,7 @@ HTML_PAGE = """<!DOCTYPE html>
         <div id="rotationQueueList" class="rotation-queue"></div>
       </section>
 
-      <section class="card stack">
+      <section class="card stack preview-panel">
         <h2>2) Preview & Adjust</h2>
 
         <div class="row">
